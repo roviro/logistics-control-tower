@@ -14,7 +14,8 @@ import {
   ArrowRight,
   Filter,
   Radio,
-  DollarSign
+  DollarSign,
+  RotateCcw
 } from 'lucide-react';
 import { ViagemTransferencia, StatusOperacionalTransferencia } from '../types';
 import { calcularDuracao, calcularHorarioLimite, avaliarStatusJornada, BASE_PLACAS_CONHECIDAS } from '../utils/jornada';
@@ -47,6 +48,22 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('TODOS');
   const [jornadaFilter, setJornadaFilter] = useState<string>('TODOS');
+  const [showColFilters, setShowColFilters] = useState(false);
+  const [colFilters, setColFilters] = useState({
+    rota: '',
+    condutor: '',
+    placa: '',
+    gobrax: '',
+    pegada: '',
+    fim: '',
+    limite: '',
+    duracao: '',
+    statusOperacional: '',
+    statusJornada: '',
+    diaria: '',
+    statusDiaria: '',
+    observacoes: ''
+  });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<ViagemTransferencia>>({});
   const [isAdding, setIsAdding] = useState(false);
@@ -56,6 +73,7 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
     operacao_rota: '',
     motorista_nome: '',
     placa: '',
+    placa_carreta: '',
     vinculo_gobrax: 'DESVINCULADO',
     horario_pegada: '06:00',
     horario_fim: '',
@@ -72,6 +90,7 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
       operacao_rota: '',
       motorista_nome: '',
       placa: '',
+      placa_carreta: '',
       vinculo_gobrax: 'DESVINCULADO',
       horario_pegada: '06:00',
       horario_fim: '',
@@ -91,7 +110,7 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
     const fim = newForm.horario_fim || '';
     const limiteHoras = newForm.limite_horas || '11:20';
     const limite = calcularHorarioLimite(pegada, limiteHoras);
-    const { status: statusJornada } = avaliarStatusJornada(pegada, fim, limiteHoras);
+    const { status: statusJornada } = avaliarStatusJornada(pegada, fim, limiteHoras, newForm.status_operacional);
     const duracao = calcularDuracao(pegada, fim);
 
     const newItem: ViagemTransferencia = {
@@ -100,6 +119,7 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
       operacao_rota: newForm.operacao_rota.toUpperCase(),
       motorista_nome: (newForm.motorista_nome || '').toUpperCase(),
       placa: (newForm.placa || '').toUpperCase(),
+      placa_carreta: (newForm.placa_carreta || '').toUpperCase(),
       vinculo_gobrax: newForm.vinculo_gobrax || 'DESVINCULADO',
       horario_pegada: pegada,
       horario_fim: fim,
@@ -130,13 +150,16 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
     const pegada = editForm.horario_pegada || original.horario_pegada;
     const fim = editForm.horario_fim ?? original.horario_fim;
     const limiteHoras = editForm.limite_horas || original.limite_horas || '11:20';
+    const statusOp = editForm.status_operacional || original.status_operacional;
     const limite = calcularHorarioLimite(pegada, limiteHoras);
-    const { status: statusJornada } = avaliarStatusJornada(pegada, fim, limiteHoras);
+    const { status: statusJornada } = avaliarStatusJornada(pegada, fim, limiteHoras, statusOp);
     const duracao = calcularDuracao(pegada, fim);
 
     const updated: ViagemTransferencia = {
       ...original,
       ...editForm,
+      placa: (editForm.placa ?? original.placa ?? '').toUpperCase(),
+      placa_carreta: (editForm.placa_carreta ?? original.placa_carreta ?? '').toUpperCase(),
       horario_pegada: pegada,
       horario_fim: fim,
       horario_limite: limite,
@@ -165,12 +188,13 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
       ultima_atualizacao: new Date().toISOString()
     };
 
-    if (field === 'horario_pegada' || field === 'horario_fim' || field === 'limite_horas') {
+    if (field === 'horario_pegada' || field === 'horario_fim' || field === 'limite_horas' || field === 'status_operacional') {
       const pegada = field === 'horario_pegada' ? value : item.horario_pegada;
       const fim = field === 'horario_fim' ? value : item.horario_fim;
       const limiteHoras = field === 'limite_horas' ? value : (item.limite_horas || '11:20');
+      const statusOp = field === 'status_operacional' ? value : item.status_operacional;
       updated.horario_limite = calcularHorarioLimite(pegada, limiteHoras);
-      const { status } = avaliarStatusJornada(pegada, fim, limiteHoras);
+      const { status } = avaliarStatusJornada(pegada, fim, limiteHoras, statusOp);
       updated.status_jornada = status;
       updated.duracao_horas = calcularDuracao(pegada, fim);
     }
@@ -202,7 +226,7 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
       fim = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     }
 
-    const { status: statusJornada } = avaliarStatusJornada(item.horario_pegada, fim, item.limite_horas || '11:20');
+    const { status: statusJornada } = avaliarStatusJornada(item.horario_pegada, fim, item.limite_horas || '11:20', newStatus);
     const duracao = calcularDuracao(item.horario_pegada, fim);
 
     const updated: ViagemTransferencia = {
@@ -217,18 +241,68 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
     onSave(updated);
   };
 
+  const activeColFiltersCount = Object.values(colFilters).filter(Boolean).length;
+
+  const handleClearFilters = () => {
+    setColFilters({
+      rota: '',
+      condutor: '',
+      placa: '',
+      gobrax: '',
+      pegada: '',
+      fim: '',
+      limite: '',
+      duracao: '',
+      statusOperacional: '',
+      statusJornada: '',
+      diaria: '',
+      statusDiaria: '',
+      observacoes: ''
+    });
+    setSearchTerm('');
+    setStatusFilter('TODOS');
+    setJornadaFilter('TODOS');
+  };
+
   const filtered = transferencias.filter(item => {
-    const matchSearch = 
-      item.operacao_rota.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.motorista_nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.placa.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.observacoes_transferencia.toLowerCase().includes(searchTerm.toLowerCase());
+    const term = searchTerm.toLowerCase();
+    const matchSearch = !term || (
+      (item.operacao_rota || '').toLowerCase().includes(term) ||
+      (item.motorista_nome || '').toLowerCase().includes(term) ||
+      (item.placa || '').toLowerCase().includes(term) ||
+      (item.placa_carreta || '').toLowerCase().includes(term) ||
+      (item.observacoes_transferencia || '').toLowerCase().includes(term)
+    );
 
     const matchStatus = statusFilter === 'TODOS' || item.status_operacional === statusFilter;
     const matchJornada = jornadaFilter === 'TODOS' || item.status_jornada === jornadaFilter;
 
-    return matchSearch && matchStatus && matchJornada;
+    if (!matchSearch || !matchStatus || !matchJornada) return false;
+
+    // Filtros por coluna
+    if (colFilters.rota && !(item.operacao_rota || '').toLowerCase().includes(colFilters.rota.toLowerCase())) return false;
+    if (colFilters.condutor && !(item.motorista_nome || '').toLowerCase().includes(colFilters.condutor.toLowerCase())) return false;
+    if (colFilters.placa && !(
+      (item.placa || '').toLowerCase().includes(colFilters.placa.toLowerCase()) || 
+      (item.placa_carreta || '').toLowerCase().includes(colFilters.placa.toLowerCase())
+    )) return false;
+    if (colFilters.gobrax && !(item.vinculo_gobrax || '').toLowerCase().includes(colFilters.gobrax.toLowerCase())) return false;
+    if (colFilters.pegada && !(item.horario_pegada || '').toLowerCase().includes(colFilters.pegada.toLowerCase())) return false;
+    if (colFilters.fim && !(item.horario_fim || '').toLowerCase().includes(colFilters.fim.toLowerCase())) return false;
+    if (colFilters.limite && !(item.horario_limite || '').toLowerCase().includes(colFilters.limite.toLowerCase())) return false;
+    if (colFilters.duracao && !(item.duracao_horas || '').toLowerCase().includes(colFilters.duracao.toLowerCase())) return false;
+    if (colFilters.statusOperacional && !(item.status_operacional || '').toLowerCase().includes(colFilters.statusOperacional.toLowerCase())) return false;
+    if (colFilters.statusJornada && !(item.status_jornada || '').toLowerCase().includes(colFilters.statusJornada.toLowerCase())) return false;
+    if (colFilters.diaria && !String(item.valor_diaria || '').includes(colFilters.diaria)) return false;
+    if (colFilters.statusDiaria && !(item.status_diaria || '').toLowerCase().includes(colFilters.statusDiaria.toLowerCase())) return false;
+    if (colFilters.observacoes && !(item.observacoes_transferencia || '').toLowerCase().includes(colFilters.observacoes.toLowerCase())) return false;
+
+    return true;
   });
+
+  const totalDiarias = filtered.reduce((acc, t) => acc + (t.valor_diaria || 0), 0);
+  const totalDiariasPagas = filtered.filter(t => t.status_diaria === 'Pago').reduce((acc, t) => acc + (t.valor_diaria || 0), 0);
+  const totalDiariasPendentes = filtered.filter(t => t.status_diaria !== 'Pago').reduce((acc, t) => acc + (t.valor_diaria || 0), 0);
 
   return (
     <div className="space-y-4">
@@ -273,6 +347,35 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
             <option value="ALERTA 1H">🟡 Alerta 1h</option>
             <option value="ESTOURADO">🔴 Estourado</option>
           </select>
+          {/* Botão Filtros Colunas */}
+          <button
+            onClick={() => setShowColFilters(!showColFilters)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+              showColFilters || activeColFiltersCount > 0
+                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                : 'bg-zinc-950/80 border-white/[0.08] text-zinc-400 hover:text-zinc-200'
+            }`}
+            title="Exibir/Ocultar linha de filtros por coluna"
+          >
+            <Filter className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Filtros Colunas</span>
+            {activeColFiltersCount > 0 && (
+              <span className="w-4 h-4 rounded-full bg-emerald-500 text-zinc-950 text-[10px] font-bold flex items-center justify-center">
+                {activeColFiltersCount}
+              </span>
+            )}
+          </button>
+
+          {activeColFiltersCount > 0 && (
+            <button
+              onClick={handleClearFilters}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-rose-400 hover:text-rose-300 bg-rose-950/20 border border-rose-500/30 transition"
+              title="Limpar todos os filtros"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>Limpar ({activeColFiltersCount})</span>
+            </button>
+          )}
         </div>
 
         {/* Botão Adicionar */}
@@ -334,7 +437,7 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
             </div>
 
             <div>
-              <label className="block text-zinc-400 mb-1 font-medium">Placa do Veículo</label>
+              <label className="block text-zinc-400 mb-1 font-medium">Placa Cavalo</label>
               <input
                 type="text"
                 list="placas-conhecidas-transf"
@@ -342,6 +445,18 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
                 value={newForm.placa}
                 onChange={(e) => setNewForm({ ...newForm, placa: e.target.value })}
                 className="w-full bg-zinc-950 border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 uppercase font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block text-zinc-400 mb-1 font-medium">Placa Carreta (Opcional)</label>
+              <input
+                type="text"
+                list="placas-conhecidas-transf"
+                placeholder="XYZ-5678"
+                value={newForm.placa_carreta}
+                onChange={(e) => setNewForm({ ...newForm, placa_carreta: e.target.value })}
+                className="w-full bg-zinc-950 border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-sky-500/50 uppercase font-mono"
               />
             </div>
 
@@ -477,6 +592,162 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
                 <th className="py-2.5 px-3.5">Observações</th>
                 <th className="py-2.5 px-3 text-right">Ações</th>
               </tr>
+              {showColFilters && (
+                <tr className="bg-zinc-950/90 border-b border-white/[0.08] text-[11px]">
+                  {/* Rota */}
+                  <th className="p-1">
+                    <input
+                      type="text"
+                      placeholder="Filtrar rota..."
+                      value={colFilters.rota}
+                      onChange={(e) => setColFilters({ ...colFilters, rota: e.target.value })}
+                      className="w-full bg-zinc-900 border border-white/[0.08] rounded px-1.5 py-1 text-zinc-200 font-normal focus:outline-none focus:border-emerald-500/50"
+                    />
+                  </th>
+                  {/* Condutor */}
+                  <th className="p-1">
+                    <input
+                      type="text"
+                      placeholder="Condutor..."
+                      value={colFilters.condutor}
+                      onChange={(e) => setColFilters({ ...colFilters, condutor: e.target.value })}
+                      className="w-full bg-zinc-900 border border-white/[0.08] rounded px-1.5 py-1 text-zinc-200 font-normal focus:outline-none focus:border-emerald-500/50"
+                    />
+                  </th>
+                  {/* Placa */}
+                  <th className="p-1">
+                    <input
+                      type="text"
+                      placeholder="Placa..."
+                      value={colFilters.placa}
+                      onChange={(e) => setColFilters({ ...colFilters, placa: e.target.value })}
+                      className="w-full bg-zinc-900 border border-white/[0.08] rounded px-1.5 py-1 text-zinc-200 font-normal uppercase font-mono focus:outline-none focus:border-emerald-500/50"
+                    />
+                  </th>
+                  {/* Gobrax */}
+                  <th className="p-1">
+                    <select
+                      value={colFilters.gobrax}
+                      onChange={(e) => setColFilters({ ...colFilters, gobrax: e.target.value })}
+                      className="w-full bg-zinc-900 border border-white/[0.08] rounded px-1 py-1 text-zinc-300 font-normal focus:outline-none focus:border-emerald-500/50 text-[10px]"
+                    >
+                      <option value="">Todos</option>
+                      <option value="VINCULADO">Vinculado</option>
+                      <option value="DESVINCULADO">Desvinculado</option>
+                    </select>
+                  </th>
+                  {/* Pegada */}
+                  <th className="p-1">
+                    <input
+                      type="text"
+                      placeholder="Pegada..."
+                      value={colFilters.pegada}
+                      onChange={(e) => setColFilters({ ...colFilters, pegada: e.target.value })}
+                      className="w-full bg-zinc-900 border border-white/[0.08] rounded px-1 py-1 text-zinc-200 font-normal font-mono focus:outline-none focus:border-emerald-500/50 text-[10px]"
+                    />
+                  </th>
+                  {/* Fim */}
+                  <th className="p-1">
+                    <input
+                      type="text"
+                      placeholder="Fim..."
+                      value={colFilters.fim}
+                      onChange={(e) => setColFilters({ ...colFilters, fim: e.target.value })}
+                      className="w-full bg-zinc-900 border border-white/[0.08] rounded px-1 py-1 text-zinc-200 font-normal font-mono focus:outline-none focus:border-emerald-500/50 text-[10px]"
+                    />
+                  </th>
+                  {/* Limite */}
+                  <th className="p-1">
+                    <input
+                      type="text"
+                      placeholder="Limite..."
+                      value={colFilters.limite}
+                      onChange={(e) => setColFilters({ ...colFilters, limite: e.target.value })}
+                      className="w-full bg-zinc-900 border border-white/[0.08] rounded px-1 py-1 text-zinc-200 font-normal font-mono focus:outline-none focus:border-emerald-500/50 text-[10px]"
+                    />
+                  </th>
+                  {/* Duração */}
+                  <th className="p-1">
+                    <input
+                      type="text"
+                      placeholder="Dur..."
+                      value={colFilters.duracao}
+                      onChange={(e) => setColFilters({ ...colFilters, duracao: e.target.value })}
+                      className="w-full bg-zinc-900 border border-white/[0.08] rounded px-1 py-1 text-zinc-200 font-normal font-mono focus:outline-none focus:border-emerald-500/50 text-[10px]"
+                    />
+                  </th>
+                  {/* Status Operacional */}
+                  <th className="p-1">
+                    <select
+                      value={colFilters.statusOperacional}
+                      onChange={(e) => setColFilters({ ...colFilters, statusOperacional: e.target.value })}
+                      className="w-full bg-zinc-900 border border-white/[0.08] rounded px-1 py-1 text-zinc-300 font-normal focus:outline-none focus:border-emerald-500/50 text-[10px]"
+                    >
+                      <option value="">Todos</option>
+                      {STATUS_OPTIONS.map(opt => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  </th>
+                  {/* Status Jornada */}
+                  <th className="p-1">
+                    <select
+                      value={colFilters.statusJornada}
+                      onChange={(e) => setColFilters({ ...colFilters, statusJornada: e.target.value })}
+                      className="w-full bg-zinc-900 border border-white/[0.08] rounded px-1 py-1 text-zinc-300 font-normal focus:outline-none focus:border-emerald-500/50 text-[10px]"
+                    >
+                      <option value="">Todos</option>
+                      <option value="SEM ESTOURO">Sem Estouro</option>
+                      <option value="ALERTA 1H">Alerta 1h</option>
+                      <option value="ESTOURADO">Estourado</option>
+                    </select>
+                  </th>
+                  {/* Diária (R$) */}
+                  <th className="p-1">
+                    <input
+                      type="text"
+                      placeholder="Valor..."
+                      value={colFilters.diaria}
+                      onChange={(e) => setColFilters({ ...colFilters, diaria: e.target.value })}
+                      className="w-full bg-zinc-900 border border-white/[0.08] rounded px-1 py-1 text-zinc-200 font-normal font-mono focus:outline-none focus:border-emerald-500/50 text-[10px]"
+                    />
+                  </th>
+                  {/* Status Diária */}
+                  <th className="p-1">
+                    <select
+                      value={colFilters.statusDiaria}
+                      onChange={(e) => setColFilters({ ...colFilters, statusDiaria: e.target.value })}
+                      className="w-full bg-zinc-900 border border-white/[0.08] rounded px-1 py-1 text-zinc-300 font-normal focus:outline-none focus:border-emerald-500/50 text-[10px]"
+                    >
+                      <option value="">Todos</option>
+                      <option value="Pendente">Pendente</option>
+                      <option value="Pago">Pago</option>
+                    </select>
+                  </th>
+                  {/* Observações */}
+                  <th className="p-1">
+                    <input
+                      type="text"
+                      placeholder="Obs..."
+                      value={colFilters.observacoes}
+                      onChange={(e) => setColFilters({ ...colFilters, observacoes: e.target.value })}
+                      className="w-full bg-zinc-900 border border-white/[0.08] rounded px-1.5 py-1 text-zinc-200 font-normal focus:outline-none focus:border-emerald-500/50"
+                    />
+                  </th>
+                  {/* Ações */}
+                  <th className="p-1 text-center">
+                    {activeColFiltersCount > 0 && (
+                      <button
+                        onClick={handleClearFilters}
+                        className="text-[10px] text-zinc-400 hover:text-zinc-200"
+                        title="Limpar filtros"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </th>
+                </tr>
+              )}
             </thead>
             <tbody className="divide-y divide-white/[0.04] text-xs">
               {filtered.length === 0 ? (
@@ -542,28 +813,80 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
                         )}
                       </td>
 
-                      {/* PLACA (CLICK-TO-EDIT COM DATALIST) */}
+                      {/* PLACA (CAVALO + CARRETA COM +R) */}
                       <td className="py-2.5 px-3 font-mono">
                         {isEditing ? (
-                          <input
-                            type="text"
-                            list="placas-conhecidas-transf"
-                            value={editForm.placa || ''}
-                            onChange={(e) => setEditForm({ ...editForm, placa: e.target.value.toUpperCase() })}
-                            className="bg-zinc-950 border border-white/[0.1] rounded px-1.5 py-0.5 text-zinc-100 uppercase w-24"
-                          />
+                          <div className="space-y-1">
+                            <input
+                              type="text"
+                              list="placas-conhecidas-transf"
+                              value={editForm.placa || ''}
+                              onChange={(e) => setEditForm({ ...editForm, placa: e.target.value.toUpperCase() })}
+                              placeholder="Cavalo"
+                              className="bg-zinc-950 border border-white/[0.1] rounded px-1.5 py-0.5 text-zinc-100 uppercase w-24 text-[11px]"
+                            />
+                            <input
+                              type="text"
+                              list="placas-conhecidas-transf"
+                              value={editForm.placa_carreta || ''}
+                              onChange={(e) => setEditForm({ ...editForm, placa_carreta: e.target.value.toUpperCase() })}
+                              placeholder="Carreta"
+                              className="bg-zinc-950 border border-white/[0.1] rounded px-1.5 py-0.5 text-sky-300 uppercase w-24 text-[11px]"
+                            />
+                          </div>
+                        ) : (item.placa_carreta && item.placa_carreta.trim()) ? (
+                          <div className="flex flex-col gap-0.5 w-28">
+                            <div className="flex items-center gap-1">
+                              <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-tighter w-2.5 shrink-0">C:</span>
+                              <input
+                                type="text"
+                                list="placas-conhecidas-transf"
+                                value={item.placa || ''}
+                                onChange={(e) => handleQuickInlineUpdate(item, 'placa', e.target.value.toUpperCase())}
+                                onBlur={(e) => handleQuickInlineUpdate(item, 'placa', e.target.value.toUpperCase(), true)}
+                                placeholder="Cavalo"
+                                aria-label={`Placa Cavalo da transferência ${item.operacao_rota}`}
+                                className="bg-zinc-950/80 hover:bg-zinc-900 border border-white/[0.08] focus:border-emerald-500/50 rounded px-1 py-0.5 font-bold text-zinc-200 w-full text-[10px] uppercase font-mono transition"
+                                title="Placa do Cavalo"
+                              />
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-[9px] font-bold text-sky-400 uppercase tracking-tighter w-2.5 shrink-0">R:</span>
+                              <input
+                                type="text"
+                                list="placas-conhecidas-transf"
+                                value={item.placa_carreta || ''}
+                                onChange={(e) => handleQuickInlineUpdate(item, 'placa_carreta', e.target.value.toUpperCase())}
+                                onBlur={(e) => handleQuickInlineUpdate(item, 'placa_carreta', e.target.value.toUpperCase(), true)}
+                                placeholder="Carreta"
+                                aria-label={`Placa Carreta da transferência ${item.operacao_rota}`}
+                                className="bg-zinc-950/80 hover:bg-zinc-900 border border-white/[0.08] focus:border-sky-500/50 rounded px-1 py-0.5 font-bold text-sky-300 w-full text-[10px] uppercase font-mono transition"
+                                title="Placa da Carreta"
+                              />
+                            </div>
+                          </div>
                         ) : (
-                          <input
-                            type="text"
-                            list="placas-conhecidas-transf"
-                            value={item.placa || ''}
-                            onChange={(e) => handleQuickInlineUpdate(item, 'placa', e.target.value.toUpperCase())}
-                            onBlur={(e) => handleQuickInlineUpdate(item, 'placa', e.target.value.toUpperCase(), true)}
-                            placeholder="---"
-                            aria-label={`Placa da transferência ${item.operacao_rota}`}
-                            className="bg-transparent hover:bg-zinc-950 border border-transparent hover:border-white/[0.1] rounded px-1.5 py-0.5 font-mono text-zinc-300 w-24 uppercase text-[11px] transition"
-                            title="Clique para editar placa (sugestões automáticas)"
-                          />
+                          <div className="flex items-center gap-1 w-28">
+                            <input
+                              type="text"
+                              list="placas-conhecidas-transf"
+                              value={item.placa || ''}
+                              onChange={(e) => handleQuickInlineUpdate(item, 'placa', e.target.value.toUpperCase())}
+                              onBlur={(e) => handleQuickInlineUpdate(item, 'placa', e.target.value.toUpperCase(), true)}
+                              placeholder="---"
+                              aria-label={`Placa da transferência ${item.operacao_rota}`}
+                              className="bg-transparent hover:bg-zinc-950 border border-transparent hover:border-white/[0.1] rounded px-1.5 py-0.5 font-mono text-zinc-300 w-full uppercase text-[11px] transition"
+                              title="Clique para editar placa (sugestões automáticas)"
+                            />
+                            <button
+                              onClick={() => handleQuickInlineUpdate(item, 'placa_carreta', ' ', true)}
+                              className="text-[9px] text-zinc-500 hover:text-sky-400 px-1 py-0.5 rounded border border-white/[0.08] shrink-0 transition"
+                              title="Adicionar placa de carreta"
+                              aria-label="Adicionar placa de carreta"
+                            >
+                              +R
+                            </button>
+                          </div>
                         )}
                       </td>
 
@@ -766,6 +1089,23 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
                 })
               )}
             </tbody>
+            <tfoot className="bg-zinc-950 font-semibold text-zinc-300 border-t border-white/[0.1] text-xs">
+              <tr>
+                <td colSpan={2} className="py-2.5 px-3.5 text-zinc-400">
+                  Total: {filtered.length} transferências
+                </td>
+                <td colSpan={8} className="py-2.5 px-3 text-right text-zinc-400">
+                  Total Diárias:
+                </td>
+                <td className="py-2.5 px-3 text-center font-mono text-emerald-400 font-bold">
+                  R$ {totalDiarias.toFixed(2)}
+                </td>
+                <td className="py-2.5 px-2.5 text-center text-[10px]">
+                  <span className="text-emerald-400" title="Total Pago">R${totalDiariasPagas.toFixed(0)}</span> / <span className="text-amber-400" title="Total Pendente">R${totalDiariasPendentes.toFixed(0)}</span>
+                </td>
+                <td colSpan={2}></td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </div>

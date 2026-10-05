@@ -12,7 +12,8 @@ import {
   Filter, 
   AlertCircle,
   FileSpreadsheet,
-  Search
+  Search,
+  ArrowRightLeft
 } from 'lucide-react';
 import { PassagemTurnoItem } from '../types';
 
@@ -44,6 +45,50 @@ export const PassagemTurnoTab: React.FC<PassagemTurnoTabProps> = ({
     observacao: 'ACOMPANHAR',
     status: 'NÃO REALIZADO'
   });
+
+  const getPrevTurno = (turno: 'T1' | 'T2' | 'T3'): 'T1' | 'T2' | 'T3' => {
+    if (turno === 'T2') return 'T1';
+    if (turno === 'T3') return 'T2';
+    return 'T3';
+  };
+
+  const activeTurno = selectedTurno === 'TODOS' ? 'T3' : selectedTurno;
+  const prevTurno = getPrevTurno(activeTurno);
+
+  const cleanDesc = (d: string) => d.replace(/\[Herdado do T[123]\]\s*/g, '').trim().toLowerCase();
+
+  const currentTurnoItems = passagens.filter(p => p.turno === activeTurno);
+  const currentDescriptions = new Set(currentTurnoItems.map(p => cleanDesc(p.descricao)));
+
+  // Pendências do turno anterior que ainda não foram migradas para o turno atual
+  const unmigratedPending = passagens.filter(p => 
+    p.turno === prevTurno && 
+    p.status === 'NÃO REALIZADO' && 
+    !currentDescriptions.has(cleanDesc(p.descricao))
+  );
+
+  const handleMigratePending = () => {
+    if (unmigratedPending.length === 0) return;
+
+    let nextNum = currentTurnoItems.length > 0 
+      ? Math.max(...currentTurnoItems.map(i => i.item_num || 0)) + 1 
+      : 1;
+
+    unmigratedPending.forEach((item, idx) => {
+      const baseDesc = item.descricao.replace(/\[Herdado do T[123]\]\s*/g, '').trim();
+      const newItem: PassagemTurnoItem = {
+        id: `pass_${Date.now()}_${Math.random().toString(36).substr(2, 6)}_${idx}`,
+        escala_id: escalaId,
+        turno: activeTurno,
+        item_num: nextNum++,
+        descricao: `[Herdado do ${prevTurno}] ${baseDesc}`,
+        observacao: item.observacao || 'ACOMPANHAR',
+        status: 'NÃO REALIZADO',
+        criado_em: new Date().toISOString()
+      };
+      onSave(newItem);
+    });
+  };
 
   const filteredPassagens = passagens.filter(p => {
     const matchesTurno = selectedTurno === 'TODOS' || p.turno === selectedTurno;
@@ -172,6 +217,18 @@ export const PassagemTurnoTab: React.FC<PassagemTurnoTabProps> = ({
             <span>{copied ? 'Copiado p/ WhatsApp!' : 'Copiar p/ WhatsApp'}</span>
           </button>
 
+          {/* Botão Migrar Pendências do Turno Anterior */}
+          {unmigratedPending.length > 0 && selectedTurno !== 'TODOS' && (
+            <button
+              onClick={handleMigratePending}
+              className="flex items-center space-x-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition active:scale-95"
+              title={`Migrar pendências do ${prevTurno} para ${activeTurno}`}
+            >
+              <ArrowRightLeft className="w-4 h-4 text-amber-400" />
+              <span>Migrar Pendências ({unmigratedPending.length})</span>
+            </button>
+          )}
+
           {/* Botão Nova Ocorrência */}
           <button
             onClick={handleOpenNew}
@@ -182,6 +239,32 @@ export const PassagemTurnoTab: React.FC<PassagemTurnoTabProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Banner de Migração de Pendências do Turno Anterior */}
+      {unmigratedPending.length > 0 && selectedTurno !== 'TODOS' && (
+        <div className="bg-amber-950/20 border border-amber-500/30 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in duration-200">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-amber-500/10 text-amber-400 rounded-lg border border-amber-500/20">
+              <AlertCircle className="w-4 h-4 text-amber-400" />
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-amber-200">
+                {unmigratedPending.length} pendência(s) em aberto do Turno {prevTurno}
+              </p>
+              <p className="text-[11px] text-zinc-400">
+                Itens com status "NÃO REALIZADO" podem ser transferidos automaticamente para acompanhamento no Turno {activeTurno}.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={handleMigratePending}
+            className="flex items-center justify-center gap-2 px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 rounded-lg text-xs font-bold transition shadow-sm active:scale-95 shrink-0"
+          >
+            <ArrowRightLeft className="w-3.5 h-3.5" />
+            <span>Migrar {unmigratedPending.length} pendência(s) para {activeTurno}</span>
+          </button>
+        </div>
+      )}
 
       {/* Controles de Filtros & Indicadores */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-zinc-900/60 p-3 rounded-xl border border-white/[0.08]">
@@ -285,7 +368,17 @@ export const PassagemTurnoTab: React.FC<PassagemTurnoTabProps> = ({
                       </td>
 
                       <td className="px-4 py-3.5 leading-relaxed">
-                        <span className="font-medium text-zinc-100">{item.descricao}</span>
+                        <div className="flex items-start gap-2">
+                          {item.descricao.includes('[Herdado do') && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 shrink-0">
+                              <ArrowRightLeft className="w-3 h-3 text-amber-400" />
+                              {item.descricao.match(/\[(Herdado do T[123])\]/)?.[1] || 'Herdado'}
+                            </span>
+                          )}
+                          <span className="font-medium text-zinc-100">
+                            {item.descricao.replace(/\[Herdado do T[123]\]\s*/g, '')}
+                          </span>
+                        </div>
                       </td>
 
                       <td className="px-4 py-3.5">

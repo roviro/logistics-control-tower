@@ -35,6 +35,8 @@ export interface ViagemDistribuicao {
   ajudante_1: string;
   ajudante_2: string;
   observacoes: string;
+  data_saida_condutor?: string; // Data de saída do condutor (YYYY-MM-DD)
+  fornecedor_ajudante?: string; // 'LED' | 'RHELP' | 'PRÓPRIO' | 'SEM AJUDANTE'
   valor_diaria: number;
   status_diaria: string; // 'Pendente' | 'Pago'
   status_motorista: string;
@@ -60,6 +62,7 @@ export interface ViagemTransferencia {
   operacao_rota: string;
   motorista_nome: string;
   placa: string;
+  placa_carreta?: string; // Placa da carreta (duas placas para transferência)
   vinculo_gobrax: 'VINCULADO' | 'DESVINCULADO'; // Vínculo Gobrax na transferência
   horario_pegada: string; // HH:mm
   horario_fim: string;    // HH:mm

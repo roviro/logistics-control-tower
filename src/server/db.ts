@@ -73,6 +73,8 @@ db.exec(`
     ajudante_1 TEXT,
     ajudante_2 TEXT,
     observacoes TEXT,
+    data_saida_condutor TEXT,
+    fornecedor_ajudante TEXT,
     valor_diaria REAL,
     status_diaria TEXT,
     status_motorista TEXT,
@@ -85,6 +87,7 @@ db.exec(`
     operacao_rota TEXT,
     motorista_nome TEXT,
     placa TEXT,
+    placa_carreta TEXT,
     vinculo_gobrax TEXT DEFAULT 'DESVINCULADO',
     horario_pegada TEXT,
     horario_fim TEXT,
@@ -176,10 +179,13 @@ try { db.exec("ALTER TABLE viagem_distribuicao ADD COLUMN status_primeira_loja T
 try { db.exec("ALTER TABLE viagem_distribuicao ADD COLUMN pirometro TEXT;"); } catch {}
 try { db.exec("ALTER TABLE viagem_distribuicao ADD COLUMN vinculo_gobrax TEXT DEFAULT 'DESVINCULADO';"); } catch {}
 try { db.exec("ALTER TABLE viagem_distribuicao ADD COLUMN motorista_restrito INTEGER DEFAULT 0;"); } catch {}
+try { db.exec("ALTER TABLE viagem_distribuicao ADD COLUMN data_saida_condutor TEXT;"); } catch {}
+try { db.exec("ALTER TABLE viagem_distribuicao ADD COLUMN fornecedor_ajudante TEXT;"); } catch {}
 
 try { db.exec("ALTER TABLE viagem_transferencia ADD COLUMN valor_diaria REAL DEFAULT 0;"); } catch {}
 try { db.exec("ALTER TABLE viagem_transferencia ADD COLUMN status_diaria TEXT DEFAULT 'Pendente';"); } catch {}
 try { db.exec("ALTER TABLE viagem_transferencia ADD COLUMN vinculo_gobrax TEXT DEFAULT 'DESVINCULADO';"); } catch {}
+try { db.exec("ALTER TABLE viagem_transferencia ADD COLUMN placa_carreta TEXT;"); } catch {}
 
 // Índices B-Tree Estratégicos (database-optimizer & sql-optimization)
 db.exec(`
@@ -256,7 +262,7 @@ export function getEscalaCompleta(dataOperacao: string): EscalaCompleta {
     const duracao = calcularDuracao(t.horario_pegada, t.horario_fim);
     const limiteHoras = t.limite_horas || '11:20';
     const horarioLimite = calcularHorarioLimite(t.horario_pegada, limiteHoras);
-    const { status: statusJornada } = avaliarStatusJornada(t.horario_pegada, t.horario_fim, limiteHoras);
+    const { status: statusJornada } = avaliarStatusJornada(t.horario_pegada, t.horario_fim, limiteHoras, undefined, t.status_operacional);
     return {
       ...t,
       limite_horas: limiteHoras,
@@ -478,24 +484,24 @@ export function saveImportedData(escalaId: string, distribuicoes: ViagemDistribu
       volume_m3, qtd_caixas, primeira_entrega, horario_primeira_entrega, horario_real_primeira_loja,
       status_primeira_loja, hora_ultima_loja, retorno_previsto, pirometro, placa_cavalo,
       placa_carreta, vinculo_gobrax, motorista_nome, motorista_restrito, ajudante_1,
-      ajudante_2, observacoes, valor_diaria, status_diaria, status_motorista, status_carregamento
+      ajudante_2, observacoes, data_saida_condutor, fornecedor_ajudante, valor_diaria, status_diaria, status_motorista, status_carregamento
     ) VALUES (
       $id, $escala_id, $embarque_cod, $rota, $tipo_veiculo, $doca, $hora_encoste_previsto,
       $hora_saida_motorista, $horario_saida_real, $justificativa_saida, $qtd_lojas, $lojas,
       $volume_m3, $qtd_caixas, $primeira_entrega, $horario_primeira_entrega, $horario_real_primeira_loja,
       $status_primeira_loja, $hora_ultima_loja, $retorno_previsto, $pirometro, $placa_cavalo,
       $placa_carreta, $vinculo_gobrax, $motorista_nome, $motorista_restrito, $ajudante_1,
-      $ajudante_2, $observacoes, $valor_diaria, $status_diaria, $status_motorista, $status_carregamento
+      $ajudante_2, $observacoes, $data_saida_condutor, $fornecedor_ajudante, $valor_diaria, $status_diaria, $status_motorista, $status_carregamento
     )
   `);
 
   const insertTransf = db.prepare(`
     INSERT OR REPLACE INTO viagem_transferencia (
-      id, escala_id, operacao_rota, motorista_nome, placa, vinculo_gobrax, horario_pegada,
+      id, escala_id, operacao_rota, motorista_nome, placa, placa_carreta, vinculo_gobrax, horario_pegada,
       horario_fim, horario_limite, limite_horas, status_operacional, status_jornada,
       duracao_horas, valor_diaria, status_diaria, observacoes_transferencia, ultima_atualizacao
     ) VALUES (
-      $id, $escala_id, $operacao_rota, $motorista_nome, $placa, $vinculo_gobrax, $horario_pegada,
+      $id, $escala_id, $operacao_rota, $motorista_nome, $placa, $placa_carreta, $vinculo_gobrax, $horario_pegada,
       $horario_fim, $horario_limite, $limite_horas, $status_operacional, $status_jornada,
       $duracao_horas, $valor_diaria, $status_diaria, $observacoes_transferencia, $ultima_atualizacao
     )
@@ -533,6 +539,8 @@ export function saveImportedData(escalaId: string, distribuicoes: ViagemDistribu
         $ajudante_1: d.ajudante_1,
         $ajudante_2: d.ajudante_2,
         $observacoes: d.observacoes,
+        $data_saida_condutor: d.data_saida_condutor || '',
+        $fornecedor_ajudante: d.fornecedor_ajudante || '',
         $valor_diaria: d.valor_diaria,
         $status_diaria: d.status_diaria,
         $status_motorista: d.status_motorista,
@@ -547,6 +555,7 @@ export function saveImportedData(escalaId: string, distribuicoes: ViagemDistribu
         $operacao_rota: t.operacao_rota,
         $motorista_nome: t.motorista_nome,
         $placa: t.placa,
+        $placa_carreta: t.placa_carreta || '',
         $vinculo_gobrax: t.vinculo_gobrax || 'DESVINCULADO',
         $horario_pegada: t.horario_pegada,
         $horario_fim: t.horario_fim,
@@ -629,14 +638,14 @@ export function upsertDistribuicao(d: ViagemDistribuicao) {
       volume_m3, qtd_caixas, primeira_entrega, horario_primeira_entrega, horario_real_primeira_loja,
       status_primeira_loja, hora_ultima_loja, retorno_previsto, pirometro, placa_cavalo,
       placa_carreta, vinculo_gobrax, motorista_nome, motorista_restrito, ajudante_1,
-      ajudante_2, observacoes, valor_diaria, status_diaria, status_motorista, status_carregamento
+      ajudante_2, observacoes, data_saida_condutor, fornecedor_ajudante, valor_diaria, status_diaria, status_motorista, status_carregamento
     ) VALUES (
       $id, $escala_id, $embarque_cod, $rota, $tipo_veiculo, $doca, $hora_encoste_previsto,
       $hora_saida_motorista, $horario_saida_real, $justificativa_saida, $qtd_lojas, $lojas,
       $volume_m3, $qtd_caixas, $primeira_entrega, $horario_primeira_entrega, $horario_real_primeira_loja,
       $status_primeira_loja, $hora_ultima_loja, $retorno_previsto, $pirometro, $placa_cavalo,
       $placa_carreta, $vinculo_gobrax, $motorista_nome, $motorista_restrito, $ajudante_1,
-      $ajudante_2, $observacoes, $valor_diaria, $status_diaria, $status_motorista, $status_carregamento
+      $ajudante_2, $observacoes, $data_saida_condutor, $fornecedor_ajudante, $valor_diaria, $status_diaria, $status_motorista, $status_carregamento
     )
   `);
 
@@ -670,6 +679,8 @@ export function upsertDistribuicao(d: ViagemDistribuicao) {
     $ajudante_1: d.ajudante_1,
     $ajudante_2: d.ajudante_2,
     $observacoes: d.observacoes,
+    $data_saida_condutor: d.data_saida_condutor || '',
+    $fornecedor_ajudante: d.fornecedor_ajudante || '',
     $valor_diaria: d.valor_diaria,
     $status_diaria: d.status_diaria,
     $status_motorista: d.status_motorista,
@@ -685,15 +696,15 @@ export function upsertTransferencia(t: ViagemTransferencia) {
   const duracao = calcularDuracao(t.horario_pegada, t.horario_fim);
   const limiteHoras = t.limite_horas || '11:20';
   const horarioLimite = calcularHorarioLimite(t.horario_pegada, limiteHoras);
-  const { status: statusJornada } = avaliarStatusJornada(t.horario_pegada, t.horario_fim, limiteHoras);
+  const { status: statusJornada } = avaliarStatusJornada(t.horario_pegada, t.horario_fim, limiteHoras, undefined, t.status_operacional);
 
   const stmt = db.prepare(`
     INSERT OR REPLACE INTO viagem_transferencia (
-      id, escala_id, operacao_rota, motorista_nome, placa, vinculo_gobrax, horario_pegada,
+      id, escala_id, operacao_rota, motorista_nome, placa, placa_carreta, vinculo_gobrax, horario_pegada,
       horario_fim, horario_limite, limite_horas, status_operacional, status_jornada,
       duracao_horas, valor_diaria, status_diaria, observacoes_transferencia, ultima_atualizacao
     ) VALUES (
-      $id, $escala_id, $operacao_rota, $motorista_nome, $placa, $vinculo_gobrax, $horario_pegada,
+      $id, $escala_id, $operacao_rota, $motorista_nome, $placa, $placa_carreta, $vinculo_gobrax, $horario_pegada,
       $horario_fim, $horario_limite, $limite_horas, $status_operacional, $status_jornada,
       $duracao_horas, $valor_diaria, $status_diaria, $observacoes_transferencia, $ultima_atualizacao
     )
@@ -705,6 +716,7 @@ export function upsertTransferencia(t: ViagemTransferencia) {
     $operacao_rota: t.operacao_rota,
     $motorista_nome: t.motorista_nome,
     $placa: t.placa,
+    $placa_carreta: t.placa_carreta || '',
     $vinculo_gobrax: t.vinculo_gobrax || 'DESVINCULADO',
     $horario_pegada: t.horario_pegada,
     $horario_fim: t.horario_fim,
@@ -885,7 +897,7 @@ export function getEscalaPeriodo(inicio: string, fim: string): EscalaCompleta {
     const duracao = calcularDuracao(t.horario_pegada, t.horario_fim);
     const limiteHoras = t.limite_horas || '11:20';
     const horarioLimite = calcularHorarioLimite(t.horario_pegada, limiteHoras);
-    const { status: statusJornada } = avaliarStatusJornada(t.horario_pegada, t.horario_fim, limiteHoras);
+    const { status: statusJornada } = avaliarStatusJornada(t.horario_pegada, t.horario_fim, limiteHoras, undefined, t.status_operacional);
     return {
       ...t,
       limite_horas: limiteHoras,

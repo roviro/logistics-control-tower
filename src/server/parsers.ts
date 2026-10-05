@@ -267,24 +267,60 @@ export async function parsePdfBuffer(buffer: Buffer, escalaId: string) {
         }
 
         // Extração de lojas atendidas na rota
-        // Formato na linha: [cxs][SIGLA_LOJA][DIA] [HORARIO][m3,kg...][SENTIDO]
-        const delRegex = /^([0-9]+)?([A-Z0-9]{3})(?:Sab|Dom|Seg|Ter|Qua|Qui|Sex|2\.F|3\.F|4\.F|5\.F|6\.F)?\s*([0-2]?[0-9]:[0-5][0-9])([0-9]+,[0-9]).*?(DIR|ESQ|AMB|\*\*\*)$/gm;
+        // Suporta com ou sem espaços, com \r, caracteres residuais no fim da linha
+        const normB = b.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        let entregas: { cxs: number; loja: string; horario: string; m3: number; sentido: string }[] = [];
+
+        // Regex primária flexibilizada: não força $ no final e tolera quebras e caracteres adicionais
+        const delRegex = /([0-9]{1,5})?\s*([A-Z0-9]{3,4})\s*(?:Sab|Dom|Seg|Ter|Qua|Qui|Sex|2\.F|3\.F|4\.F|5\.F|6\.F)?\s*([0-2]?[0-9]:[0-5][0-9])\s*([0-9]+[.,][0-9]+).*?(DIR|ESQ|AMB|\*{3})/gi;
         let delMatch;
-        const entregas: { cxs: number; loja: string; horario: string; m3: number; sentido: string }[] = [];
-        while ((delMatch = delRegex.exec(b)) !== null) {
+        while ((delMatch = delRegex.exec(normB)) !== null) {
           const loja = delMatch[2].toUpperCase();
-          if (['ENT', 'RET', 'DOM', 'SAB', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'KMS', 'PAG'].includes(loja)) continue;
+          if (['ENT', 'RET', 'DOM', 'SAB', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'KMS', 'PAG', 'MBR', 'CAR', 'TRU', 'TOC', 'VUC'].includes(loja)) continue;
           entregas.push({
             cxs: parseInt(delMatch[1] || '0', 10),
             loja,
             horario: delMatch[3],
             m3: parseFloat((delMatch[4] || '0').replace(',', '.')),
-            sentido: delMatch[5]
+            sentido: delMatch[5].toUpperCase()
           });
         }
 
-        const sumCxs = entregas.reduce((acc, e) => acc + e.cxs, 0);
-        const sumM3 = Math.round(entregas.reduce((acc, e) => acc + e.m3, 0) * 10) / 10;
+        // Fallback linha a linha caso a regex padrão não encontre
+        if (entregas.length === 0) {
+          const lines = normB.split('\n');
+          for (const l of lines) {
+            const line = l.trim();
+            if (!line || line.length < 5) continue;
+            const timeM = line.match(/\b([0-2]?[0-9]:[0-5][0-9])\b/);
+            if (!timeM) continue;
+            const lojaM = line.match(/\b([A-Z]{3})\b/);
+            if (!lojaM) continue;
+            const loja = lojaM[1].toUpperCase();
+            if (['ENT', 'RET', 'DOM', 'SAB', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'KMS', 'PAG', 'MBR', 'CAR', 'TRU', 'TOC', 'VUC', 'PES', 'VOL'].includes(loja)) continue;
+            
+            const cxsM = line.match(/^\s*([0-9]{1,5})\b/);
+            const m3M = line.match(/\b([0-9]+[.,][0-9]+)\b/);
+            const sentidoM = line.match(/\b(DIR|ESQ|AMB|\*{3})\b/i);
+
+            entregas.push({
+              cxs: parseInt(cxsM ? cxsM[1] : '0', 10),
+              loja,
+              horario: timeM[1],
+              m3: parseFloat(m3M ? m3M[1].replace(',', '.') : '0'),
+              sentido: sentidoM ? sentidoM[1].toUpperCase() : ''
+            });
+          }
+        }
+
+        let sumCxs = entregas.reduce((acc, e) => acc + e.cxs, 0);
+        let sumM3 = Math.round(entregas.reduce((acc, e) => acc + e.m3, 0) * 10) / 10;
+
+        // Se ainda não achou caixas, tenta capturar resumo do bloco
+        if (sumCxs === 0) {
+          const totalCxsMatch = normB.match(/(?:Total|Totais|Carga|Volumes?|Cxs?):\s*([0-9]+)/i);
+          if (totalCxsMatch) sumCxs = parseInt(totalCxsMatch[1], 10);
+        }
 
         const primeiraLoja = entregas[0]?.loja || '';
         const hora1Loja = entregas[0]?.horario || '';

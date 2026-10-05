@@ -80,34 +80,53 @@ export function avaliarStatusJornada(
   horarioPegada: string,
   horarioFim: string = '',
   limiteHoras: string = '11:20',
-  currentTimeStr?: string
+  currentTimeStr?: string,
+  statusOperacional?: string
 ): { status: StatusJornada; minutosRestantes: number } {
   if (!horarioPegada || !horarioPegada.includes(':')) {
     return { status: 'SEM ESTOURO', minutosRestantes: 999 };
   }
 
-  const pegadaMin = timeToMinutes(horarioPegada);
   const duracaoLimiteMin = timeToMinutes(limiteHoras);
-  const limiteAbsolutoMin = pegadaMin + duracaoLimiteMin;
 
-  let currentMin: number;
+  // Viagens que ainda estão iniciando ou aguardando liberação não devem computar estouro
+  if (statusOperacional === 'INICIANDO' || statusOperacional === 'AGUARDANDO LIBERACAO') {
+    return { status: 'SEM ESTOURO', minutosRestantes: duracaoLimiteMin };
+  }
+
+  const pegadaMin = timeToMinutes(horarioPegada);
+  let tempoDecorridoMin = 0;
+
   if (horarioFim && horarioFim.includes(':')) {
     let fimMin = timeToMinutes(horarioFim);
     if (fimMin < pegadaMin) fimMin += 1440;
-    currentMin = fimMin;
+    tempoDecorridoMin = fimMin - pegadaMin;
   } else {
+    let currentMin: number;
     if (currentTimeStr && currentTimeStr.includes(':')) {
       currentMin = timeToMinutes(currentTimeStr);
     } else {
       const now = new Date();
       currentMin = now.getHours() * 60 + now.getMinutes();
     }
-    if (currentMin < pegadaMin) {
-      currentMin += 1440;
+
+    if (currentMin >= pegadaMin) {
+      tempoDecorridoMin = currentMin - pegadaMin;
+    } else {
+      // Se a hora atual é menor que a hora de pegada:
+      // Ex: pegada 20:00 (1200) e now 02:00 (120) da madrugada seguinte -> decorrido = (120 + 1440) - 1200 = 360m (6h)
+      // Ex: pegada 20:00 (1200) e now 14:00 (840) da tarde -> a viagem é no futuro hoje! Faltam 6h para iniciar -> decorrido = 0
+      const diffOvernight = (currentMin + 1440) - pegadaMin;
+      if (diffOvernight > 960) {
+        // Mais de 16h de diferença significa que o horário está agendado para mais tarde no dia
+        tempoDecorridoMin = 0;
+      } else {
+        tempoDecorridoMin = diffOvernight;
+      }
     }
   }
 
-  const minutosRestantes = limiteAbsolutoMin - currentMin;
+  const minutosRestantes = duracaoLimiteMin - tempoDecorridoMin;
 
   if (minutosRestantes < 0) {
     return { status: 'ESTOURADO', minutosRestantes };
