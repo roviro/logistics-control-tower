@@ -39,10 +39,31 @@ describe('Jornada e Transferências - Testes de Regra de Negócio', () => {
     expect(res.minutosRestantes).toBe(680); // 11h20 completas
   });
 
-  it('não deve estourar quando a rota é reutilizada e tinha fim antigo residual', () => {
-    // Pegada alterada para 14:00, mas tinha fim residual 11:30 de viagem matutina
-    const res = avaliarStatusJornada('14:00', '11:30', '11:20', 'INICIANDO');
+  it('deve acusar ESTOURADO quando uma viagem durou 14h (ex: pegada 13:00 e fim 03:00 com limite 11:20)', () => {
+    // Usuário informou pegada 13:00 e fim 03:00 (14 horas de viagem decorridas)
+    const res = avaliarStatusJornada('13:00', '03:00', '11:20', 'INICIANDO');
+    expect(res.status).toBe('ESTOURADO');
+    expect(res.minutosRestantes).toBe(-160); // 680 - 840 = -160 min
+  });
+
+  it('deve calcular corretamente viagem concluída dentro do prazo (ex: pegada 06:00 e fim 14:00)', () => {
+    const res = avaliarStatusJornada('06:00', '14:00', '11:20', 'FINALIZADO');
     expect(res.status).toBe('SEM ESTOURO');
+    expect(res.minutosRestantes).toBe(200);
+  });
+
+  it('deve acusar ALERTA 1H quando a viagem estiver a menos de 60 min do limite', () => {
+    // Pegada 06:00 e fim 17:00 (11h00 de duração, limite 11h20 -> restam 20 min)
+    const res = avaliarStatusJornada('06:00', '17:00', '11:20', 'FINALIZADO');
+    expect(res.status).toBe('ALERTA 1H');
+    expect(res.minutosRestantes).toBe(20);
+  });
+
+  it('não deve estourar quando a rota é reutilizada com nova pegada (fim limpo e status INICIANDO)', () => {
+    // Pegada alterada para 14:00 e fim devidamente limpo
+    const res = avaliarStatusJornada('14:00', '', '11:20', 'INICIANDO');
+    expect(res.status).toBe('SEM ESTOURO');
+    expect(res.minutosRestantes).toBe(680);
   });
 
   it('deve calcular corretamente viagem noturna legítima em trânsito', () => {
@@ -52,7 +73,7 @@ describe('Jornada e Transferências - Testes de Regra de Negócio', () => {
     expect(res.minutosRestantes).toBe(680 - 360); // 320 min restantes
   });
 
-  it('deve acusar ESTOURADO legitimamente quando ultrapassar o limite de horas', () => {
+  it('deve acusar ESTOURADO legitimamente quando ultrapassar o limite de horas em trânsito', () => {
     // Pegada 06:00, agora 18:30 (12h30 decorridas = 750 min > 680 min)
     const res = avaliarStatusJornada('06:00', '', '11:20', '18:30', 'EM TRANSITO');
     expect(res.status).toBe('ESTOURADO');

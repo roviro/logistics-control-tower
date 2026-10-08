@@ -1,8 +1,42 @@
 import { describe, expect, it } from 'bun:test';
-import { checkDuplicidades, saveImportedData, getEscalaCompleta, getOrCreateEscala } from './db';
+import { checkDuplicidades, saveImportedData, getEscalaCompleta, getOrCreateEscala, upsertTransferencia } from './db';
 import { ViagemDistribuicao, ViagemTransferencia } from '../types';
 
 describe('Ordem dos PDFs e Reutilização de Rotas de Transferência', () => {
+  it('deve marcar ESTOURADO e calcular duração de 14h quando pegada for 13:00 e fim for 03:00', () => {
+    const escala = getOrCreateEscala('2099-12-29');
+    const escalaId = escala.id;
+
+    const transf14h: ViagemTransferencia = {
+      id: 't-14h-test',
+      escala_id: escalaId,
+      operacao_rota: 'TRJD71 (CP773M)',
+      motorista_nome: 'MOTORISTA TESTE',
+      placa: 'TEST123',
+      horario_pegada: '13:00',
+      horario_fim: '03:00',
+      horario_limite: '00:20',
+      limite_horas: '11:20',
+      status_operacional: 'INICIANDO',
+      status_jornada: 'SEM ESTOURO',
+      duracao_horas: '14:00',
+      valor_diaria: 0,
+      status_diaria: 'Pendente',
+      observacoes_transferencia: 'Teste de 14h',
+      ultima_atualizacao: new Date().toISOString()
+    };
+
+    upsertTransferencia(transf14h);
+
+    const completa = getEscalaCompleta('2099-12-29');
+    const salva = completa.transferencias.find(t => t.id === 't-14h-test');
+
+    expect(salva).toBeDefined();
+    expect(salva?.duracao_horas).toBe('14:00');
+    expect(salva?.status_jornada).toBe('ESTOURADO');
+    expect(salva?.status_operacional).toBe('FINALIZADO');
+  });
+
   it('deve permitir reutilizar rotas de transferência com o mesmo nome em horários de pegada diferentes sem acusar conflito', () => {
     const escala = getOrCreateEscala('2099-12-30');
     const escalaId = escala.id;

@@ -277,12 +277,18 @@ export function getEscalaCompleta(dataOperacao: string): EscalaCompleta {
   ).all(escala.id);
 
   transferencias = transferencias.map((t: ViagemTransferencia) => {
-    const duracao = calcularDuracao(t.horario_pegada, t.horario_fim);
+    let horarioFim = t.horario_fim || '';
+    let statusOperacional = t.status_operacional || 'INICIANDO';
+    if (horarioFim && (statusOperacional === 'INICIANDO' || statusOperacional === 'AGUARDANDO LIBERACAO')) {
+      statusOperacional = 'FINALIZADO';
+    }
+    const duracao = calcularDuracao(t.horario_pegada, horarioFim);
     const limiteHoras = t.limite_horas || '11:20';
     const horarioLimite = calcularHorarioLimite(t.horario_pegada, limiteHoras);
-    const { status: statusJornada } = avaliarStatusJornada(t.horario_pegada, t.horario_fim, limiteHoras, undefined, t.status_operacional);
+    const { status: statusJornada } = avaliarStatusJornada(t.horario_pegada, horarioFim, limiteHoras, undefined, statusOperacional);
     return {
       ...t,
+      status_operacional: statusOperacional,
       limite_horas: limiteHoras,
       horario_limite: horarioLimite,
       duracao_horas: duracao,
@@ -748,17 +754,10 @@ export function upsertTransferencia(t: ViagemTransferencia) {
   let horarioFim = t.horario_fim || '';
   let statusOperacional = t.status_operacional || 'INICIANDO';
 
-  // Proteção para reutilização de linhas de transferência:
-  // Se o fim registrado for resíduo incompatível de viagem anterior (>16h diferença), limpa o fim
-  if (t.horario_pegada && horarioFim) {
-    const pegadaMin = timeToMinutes(t.horario_pegada);
-    const fimMin = timeToMinutes(horarioFim);
-    if (fimMin < pegadaMin && (fimMin + 1440 - pegadaMin) > 960) {
-      horarioFim = '';
-      if (statusOperacional === 'FINALIZADO') {
-        statusOperacional = 'INICIANDO';
-      }
-    }
+  // Se o usuário informou horário de fim e o status ainda estava INICIANDO ou AGUARDANDO,
+  // avança automaticamente para FINALIZADO
+  if (horarioFim && (statusOperacional === 'INICIANDO' || statusOperacional === 'AGUARDANDO LIBERACAO')) {
+    statusOperacional = 'FINALIZADO';
   }
 
   const duracao = calcularDuracao(t.horario_pegada, horarioFim);
@@ -787,10 +786,10 @@ export function upsertTransferencia(t: ViagemTransferencia) {
     $placa_carreta: t.placa_carreta || '',
     $vinculo_gobrax: t.vinculo_gobrax || 'DESVINCULADO',
     $horario_pegada: t.horario_pegada,
-    $horario_fim: t.horario_fim,
+    $horario_fim: horarioFim,
     $horario_limite: horarioLimite,
     $limite_horas: limiteHoras,
-    $status_operacional: t.status_operacional,
+    $status_operacional: statusOperacional,
     $status_jornada: statusJornada,
     $duracao_horas: duracao,
     $valor_diaria: t.valor_diaria || 0,
@@ -962,12 +961,18 @@ export function getEscalaPeriodo(inicio: string, fim: string): EscalaCompleta {
   ).all();
 
   transferencias = transferencias.map((t: ViagemTransferencia) => {
-    const duracao = calcularDuracao(t.horario_pegada, t.horario_fim);
+    let horarioFim = t.horario_fim || '';
+    let statusOperacional = t.status_operacional || 'INICIANDO';
+    if (horarioFim && (statusOperacional === 'INICIANDO' || statusOperacional === 'AGUARDANDO LIBERACAO')) {
+      statusOperacional = 'FINALIZADO';
+    }
+    const duracao = calcularDuracao(t.horario_pegada, horarioFim);
     const limiteHoras = t.limite_horas || '11:20';
     const horarioLimite = calcularHorarioLimite(t.horario_pegada, limiteHoras);
-    const { status: statusJornada } = avaliarStatusJornada(t.horario_pegada, t.horario_fim, limiteHoras, undefined, t.status_operacional);
+    const { status: statusJornada } = avaliarStatusJornada(t.horario_pegada, horarioFim, limiteHoras, undefined, statusOperacional);
     return {
       ...t,
+      status_operacional: statusOperacional,
       limite_horas: limiteHoras,
       horario_limite: horarioLimite,
       duracao_horas: duracao,

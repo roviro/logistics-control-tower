@@ -109,9 +109,13 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
 
     const pegada = newForm.horario_pegada || '06:00';
     const fim = newForm.horario_fim || '';
+    let statusOp = newForm.status_operacional || 'INICIANDO';
+    if (fim && (statusOp === 'INICIANDO' || statusOp === 'AGUARDANDO LIBERACAO')) {
+      statusOp = 'FINALIZADO';
+    }
     const limiteHoras = newForm.limite_horas || '11:20';
     const limite = calcularHorarioLimite(pegada, limiteHoras);
-    const { status: statusJornada } = avaliarStatusJornada(pegada, fim, limiteHoras, newForm.status_operacional);
+    const { status: statusJornada } = avaliarStatusJornada(pegada, fim, limiteHoras, statusOp);
     const duracao = calcularDuracao(pegada, fim);
 
     const newItem: ViagemTransferencia = {
@@ -126,7 +130,7 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
       horario_fim: fim,
       horario_limite: limite,
       limite_horas: limiteHoras,
-      status_operacional: newForm.status_operacional || 'INICIANDO',
+      status_operacional: statusOp,
       status_jornada: statusJornada,
       duracao_horas: duracao,
       valor_diaria: Number(newForm.valor_diaria) || 0,
@@ -182,6 +186,11 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
       }
     }
 
+    // Se informou horário de fim e o status ainda estava INICIANDO ou AGUARDANDO, avança para FINALIZADO
+    if (fim && (statusOp === 'INICIANDO' || statusOp === 'AGUARDANDO LIBERACAO')) {
+      statusOp = 'FINALIZADO';
+    }
+
     const limite = calcularHorarioLimite(pegada, limiteHoras);
     const { status: statusJornada } = avaliarStatusJornada(pegada, fim, limiteHoras, statusOp);
     const duracao = calcularDuracao(pegada, fim);
@@ -235,6 +244,12 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
           updated.horario_fim = '';
           updated.status_operacional = 'INICIANDO';
         }
+      }
+
+      // Se informou ou alterou o horário de término e o status estava INICIANDO/AGUARDANDO, avança para FINALIZADO
+      if (field === 'horario_fim' && fim && (statusOp === 'INICIANDO' || statusOp === 'AGUARDANDO LIBERACAO')) {
+        statusOp = 'FINALIZADO';
+        updated.status_operacional = 'FINALIZADO';
       }
 
       // Validação de horário válido antes de calcular jornada
@@ -988,12 +1003,18 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
                             type="time"
                             value={editForm.horario_fim || ''}
                             onChange={(e) => setEditForm({ ...editForm, horario_fim: e.target.value })}
-                            className="bg-zinc-950 border border-white/[0.1] rounded px-1 py-0.5 text-zinc-100 w-16"
+                            className="bg-zinc-950 border border-white/[0.1] rounded px-1 py-0.5 text-zinc-100 w-20"
                           />
                         ) : (
-                          <span className={item.horario_fim ? 'text-zinc-300 font-medium' : 'text-zinc-600'}>
-                            {item.horario_fim || '--:--'}
-                          </span>
+                          <input
+                            type="time"
+                            value={item.horario_fim || ''}
+                            onChange={(e) => handleQuickInlineUpdate(item, 'horario_fim', e.target.value)}
+                            onBlur={(e) => handleQuickInlineUpdate(item, 'horario_fim', e.target.value, true)}
+                            className="bg-transparent hover:bg-zinc-950 border border-transparent hover:border-white/[0.1] rounded px-1 py-0.5 font-mono text-zinc-200 w-20 transition"
+                            title="Clique para alterar horário de término (calcula duração e encerra viagem)"
+                            aria-label={`Horário de término da transferência ${item.operacao_rota}`}
+                          />
                         )}
                       </td>
 

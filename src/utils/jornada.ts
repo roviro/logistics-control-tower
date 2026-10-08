@@ -142,65 +142,57 @@ export function avaliarStatusJornada(
   }
 
   const duracaoLimiteMin = timeToMinutes(limiteHoras);
+  const pegadaMin = timeToMinutes(horarioPegada);
+  let tempoDecorridoMin = 0;
 
-  // Viagens que ainda estão iniciando ou aguardando liberação nunca computam estouro
+  // CASO 1: Viagem possui horário de término (viagem concluída ou teste de duração)
+  // Calcula a duração real concluída da viagem (independentemente de status residual)
+  if (horarioFim && horarioFim.includes(':')) {
+    const fimMin = timeToMinutes(horarioFim);
+    if (fimMin < pegadaMin) {
+      // Cruzou a meia-noite (ex: pegada 13:00 e fim 03:00 -> 14h = 840 min; pegada 22:00 e fim 06:00 -> 8h = 480 min)
+      tempoDecorridoMin = (fimMin + 1440) - pegadaMin;
+    } else {
+      tempoDecorridoMin = fimMin - pegadaMin;
+    }
+
+    const minutosRestantes = duracaoLimiteMin - tempoDecorridoMin;
+    if (minutosRestantes < 0) {
+      return { status: 'ESTOURADO', minutosRestantes };
+    } else if (minutosRestantes <= 60) {
+      return { status: 'ALERTA 1H', minutosRestantes };
+    }
+    return { status: 'SEM ESTOURO', minutosRestantes };
+  }
+
+  // CASO 2: Viagem sem horário de término preenchido (em andamento ou aguardando liberação)
+  // Viagens que ainda estão iniciando ou aguardando liberação não estão em rota
   if (statusOperacional === 'INICIANDO' || statusOperacional === 'AGUARDANDO LIBERACAO') {
     return { status: 'SEM ESTOURO', minutosRestantes: duracaoLimiteMin };
   }
 
-  const pegadaMin = timeToMinutes(horarioPegada);
-  let tempoDecorridoMin = 0;
-
-  if (horarioFim && horarioFim.includes(':')) {
-    let fimMin = timeToMinutes(horarioFim);
-    if (fimMin < pegadaMin) {
-      // Se cruzou a meia-noite (ex: pegada 22:00 e fim 04:00 -> 6 horas)
-      // Porém, se a diferença calculada for maior que 16 horas (ex: pegada 14:00 e fim 11:30 residual -> 21h30),
-      // trata-se de um fim antigo residual de viagem anterior que não condiz com a nova pegada.
-      const diffCross = (fimMin + 1440) - pegadaMin;
-      if (diffCross > 960) {
-        // Horário de fim residual/inválido: desconsiderar estouro
-        tempoDecorridoMin = 0;
-      } else {
-        tempoDecorridoMin = diffCross;
-      }
-    } else {
-      tempoDecorridoMin = fimMin - pegadaMin;
-    }
+  let currentMin: number;
+  if (currentTimeStr && currentTimeStr.includes(':')) {
+    currentMin = timeToMinutes(currentTimeStr);
   } else {
-    let currentMin: number;
-    if (currentTimeStr && currentTimeStr.includes(':')) {
-      currentMin = timeToMinutes(currentTimeStr);
+    // Obter horário atual no fuso de Brasília (America/Sao_Paulo) de forma segura em qualquer servidor
+    currentMin = timeToMinutes(getBrasiliaTimeStr());
+  }
+
+  if (currentMin >= pegadaMin) {
+    tempoDecorridoMin = currentMin - pegadaMin;
+  } else {
+    // A hora atual é menor que a hora de pegada.
+    // Caso A: Viagem agendada para mais tarde hoje (ex: agora 14:00 e pegada 20:00).
+    // Caso B: Viagem iniciada ontem à noite que cruzou a madrugada (ex: pegada 22:00 e agora 04:00).
+    const isMadrugadaManha = currentMin <= 660; // até 11:00 da manhã
+    const isPegadaNoite = pegadaMin >= 1080;    // pegada a partir das 18:00
+    const diffOvernight = (currentMin + 1440) - pegadaMin;
+
+    if (isMadrugadaManha && isPegadaNoite && diffOvernight <= 1200) {
+      tempoDecorridoMin = diffOvernight;
     } else {
-      // Obter horário atual no fuso de Brasília (America/Sao_Paulo) de forma segura em qualquer servidor
-      currentMin = timeToMinutes(getBrasiliaTimeStr());
-    }
-
-    if (currentMin >= pegadaMin) {
-      tempoDecorridoMin = currentMin - pegadaMin;
-    } else {
-      // A hora atual é menor que a hora de pegada.
-      // Caso 1: Viagem agendada para mais tarde hoje (ex: agora 14:00 e pegada 20:00).
-      // Caso 2: Viagem iniciada ontem à noite que cruzou a madrugada (ex: pegada 22:00 e agora 04:00).
-      // Somente computar overnight se o horário atual for na madrugada/manhã (<= 10:00),
-      // a pegada tiver ocorrido à noite (>= 18:00) e o status for em trânsito.
-      const isEmTransito = statusOperacional && (
-        statusOperacional === 'EM TRANSITO' || 
-        statusOperacional.includes('SENTIDO') || 
-        statusOperacional === 'CARREGANDO' || 
-        statusOperacional === 'EM DESCARGA' || 
-        statusOperacional === 'CHEGOU NO LOCAL'
-      );
-
-      const isMadrugadaManha = currentMin <= 600; // até 10:00
-      const isPegadaNoite = pegadaMin >= 1080;    // a partir das 18:00
-      const diffOvernight = (currentMin + 1440) - pegadaMin;
-
-      if (isEmTransito && isMadrugadaManha && isPegadaNoite && diffOvernight <= duracaoLimiteMin + 120) {
-        tempoDecorridoMin = diffOvernight;
-      } else {
-        tempoDecorridoMin = 0;
-      }
+      tempoDecorridoMin = 0;
     }
   }
 
