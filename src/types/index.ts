@@ -41,6 +41,7 @@ export interface ViagemDistribuicao {
   status_diaria: string; // 'Pendente' | 'Pago'
   status_motorista: string;
   status_carregamento: string;
+  ordem?: number; // Ordem de sequência original da rota no PDF/importação
 }
 
 export type StatusOperacionalTransferencia = 

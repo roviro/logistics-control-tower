@@ -25,6 +25,9 @@ export const PatioViewTab: React.FC<PatioViewTabProps> = ({
       const encA = a.hora_encoste_previsto || '99:99';
       const encB = b.hora_encoste_previsto || '99:99';
       if (encA !== encB) return encA.localeCompare(encB);
+      const ordA = a.ordem !== undefined && a.ordem !== null ? a.ordem : 999999;
+      const ordB = b.ordem !== undefined && b.ordem !== null ? b.ordem : 999999;
+      if (ordA !== ordB) return ordA - ordB;
       const docaA = parseInt(a.doca, 10) || 999;
       const docaB = parseInt(b.doca, 10) || 999;
       return docaA - docaB;

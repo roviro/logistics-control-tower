@@ -144,7 +144,8 @@ export function parseXlsxBuffer(buffer: ArrayBuffer | Buffer, escalaId: string) 
         valor_diaria: colDiaria >= 0 ? Number(row[colDiaria]) || 0 : 0,
         status_diaria: colStatusDiaria >= 0 ? String(row[colStatusDiaria] || 'Pendente').trim() : 'Pendente',
         status_motorista: colStatusMotorista >= 0 ? String(row[colStatusMotorista] || 'OK').trim() : 'OK',
-        status_carregamento: 'Pendente'
+        status_carregamento: 'Pendente',
+        ordem: distribuicoes.length + 1
       });
     }
   }
@@ -367,7 +368,8 @@ export async function parsePdfBuffer(buffer: Buffer, escalaId: string) {
           valor_diaria: 0,
           status_diaria: 'Pendente',
           status_motorista: 'OK',
-          status_carregamento: 'Pendente'
+          status_carregamento: 'Pendente',
+          ordem: distribuicoes.length + 1
         });
 
         // Rotas com Cross-Docking de Jundiaí (TRJD...) geram acompanhamento de transferência
@@ -489,7 +491,8 @@ export async function parsePdfBuffer(buffer: Buffer, escalaId: string) {
           valor_diaria: 0,
           status_diaria: 'Pendente',
           status_motorista: 'OK',
-          status_carregamento: 'Pendente'
+          status_carregamento: 'Pendente',
+          ordem: distribuicoes.length + 1
         });
       }
     }
@@ -629,7 +632,8 @@ export function parseStructuredAiJson(rawInput: any, escalaId: string) {
         valor_diaria: 0,
         status_diaria: 'Pendente',
         status_motorista: 'OK',
-        status_carregamento: 'Pendente'
+        status_carregamento: 'Pendente',
+        ordem: distribuicoes.length + 1
       });
     }
   }

@@ -78,7 +78,8 @@ db.exec(`
     valor_diaria REAL,
     status_diaria TEXT,
     status_motorista TEXT,
-    status_carregamento TEXT
+    status_carregamento TEXT,
+    ordem INTEGER DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS viagem_transferencia (
@@ -181,6 +182,7 @@ try { db.exec("ALTER TABLE viagem_distribuicao ADD COLUMN vinculo_gobrax TEXT DE
 try { db.exec("ALTER TABLE viagem_distribuicao ADD COLUMN motorista_restrito INTEGER DEFAULT 0;"); } catch {}
 try { db.exec("ALTER TABLE viagem_distribuicao ADD COLUMN data_saida_condutor TEXT;"); } catch {}
 try { db.exec("ALTER TABLE viagem_distribuicao ADD COLUMN fornecedor_ajudante TEXT;"); } catch {}
+try { db.exec("ALTER TABLE viagem_distribuicao ADD COLUMN ordem INTEGER DEFAULT 0;"); } catch {}
 
 try { db.exec("ALTER TABLE viagem_transferencia ADD COLUMN valor_diaria REAL DEFAULT 0;"); } catch {}
 try { db.exec("ALTER TABLE viagem_transferencia ADD COLUMN status_diaria TEXT DEFAULT 'Pendente';"); } catch {}
@@ -192,6 +194,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_dist_escala ON viagem_distribuicao(escala_id);
   CREATE INDEX IF NOT EXISTS idx_dist_rota ON viagem_distribuicao(rota);
   CREATE INDEX IF NOT EXISTS idx_dist_doca ON viagem_distribuicao(doca);
+  CREATE INDEX IF NOT EXISTS idx_dist_ordem ON viagem_distribuicao(ordem);
   CREATE INDEX IF NOT EXISTS idx_transf_escala ON viagem_transferencia(escala_id);
   CREATE INDEX IF NOT EXISTS idx_transf_rota ON viagem_transferencia(operacao_rota);
   CREATE INDEX IF NOT EXISTS idx_plantao_escala ON plantao_reserva(escala_id);
@@ -230,7 +233,7 @@ export function getEscalaCompleta(dataOperacao: string): EscalaCompleta {
   const escala = getOrCreateEscala(dataOperacao);
   
   let distribuicoes = db.query<ViagemDistribuicao, [string]>(
-    'SELECT * FROM viagem_distribuicao WHERE escala_id = ? ORDER BY doca ASC, hora_encoste_previsto ASC'
+    'SELECT * FROM viagem_distribuicao WHERE escala_id = ? ORDER BY hora_encoste_previsto ASC, ordem ASC, rowid ASC'
   ).all(escala.id);
 
   // Recalcular retorno previsto e conformidade de primeira loja
@@ -440,11 +443,14 @@ export function checkDuplicidades(
     'SELECT rota FROM viagem_distribuicao WHERE escala_id = ?'
   ).all(escalaId).map(r => (r.rota || '').trim().toUpperCase()).filter(Boolean);
 
-  const rotasTransfDb = db.query<{ operacao_rota: string }, [string]>(
-    'SELECT operacao_rota FROM viagem_transferencia WHERE escala_id = ?'
-  ).all(escalaId).map(r => (r.operacao_rota || '').trim().toUpperCase()).filter(Boolean);
+  const rotasTransfDb = db.query<{ operacao_rota: string; horario_pegada: string }, [string]>(
+    'SELECT operacao_rota, horario_pegada FROM viagem_transferencia WHERE escala_id = ?'
+  ).all(escalaId);
 
-  const existingInDb = new Set([...rotasDistDb, ...rotasTransfDb]);
+  const existingDistSet = new Set(rotasDistDb);
+  const existingTransfKeys = new Set(
+    rotasTransfDb.map(t => `${(t.operacao_rota || '').trim().toUpperCase()}__${(t.horario_pegada || '').trim()}`)
+  );
 
   const rotas_conflitantes: string[] = [];
   const novas_rotas: string[] = [];
@@ -452,7 +458,7 @@ export function checkDuplicidades(
   for (const d of distribuicoes) {
     const key = (d.rota || d.embarque_cod || '').trim().toUpperCase();
     if (!key) continue;
-    if (existingInDb.has(key)) {
+    if (existingDistSet.has(key)) {
       if (!rotas_conflitantes.includes(key)) rotas_conflitantes.push(key);
     } else {
       if (!novas_rotas.includes(key)) novas_rotas.push(key);
@@ -460,12 +466,14 @@ export function checkDuplicidades(
   }
 
   for (const t of transferencias) {
-    const key = (t.operacao_rota || '').trim().toUpperCase();
-    if (!key) continue;
-    if (existingInDb.has(key)) {
-      if (!rotas_conflitantes.includes(key)) rotas_conflitantes.push(key);
+    const rotaKey = (t.operacao_rota || '').trim().toUpperCase();
+    if (!rotaKey) continue;
+    const fullKey = `${rotaKey}__${(t.horario_pegada || '').trim()}`;
+    const displayLabel = t.horario_pegada ? `${rotaKey} [${t.horario_pegada}]` : rotaKey;
+    if (existingTransfKeys.has(fullKey)) {
+      if (!rotas_conflitantes.includes(displayLabel)) rotas_conflitantes.push(displayLabel);
     } else {
-      if (!novas_rotas.includes(key)) novas_rotas.push(key);
+      if (!novas_rotas.includes(displayLabel)) novas_rotas.push(displayLabel);
     }
   }
 
@@ -477,6 +485,11 @@ export function checkDuplicidades(
 }
 
 export function saveImportedData(escalaId: string, distribuicoes: ViagemDistribuicao[], transferencias: ViagemTransferencia[]) {
+  const maxRow = db.query<{ max_ordem: number | null }, [string]>(
+    'SELECT MAX(ordem) as max_ordem FROM viagem_distribuicao WHERE escala_id = ?'
+  ).get(escalaId);
+  const currentMaxOrdem = maxRow?.max_ordem || 0;
+
   const insertDist = db.prepare(`
     INSERT OR REPLACE INTO viagem_distribuicao (
       id, escala_id, embarque_cod, rota, tipo_veiculo, doca, hora_encoste_previsto,
@@ -484,14 +497,14 @@ export function saveImportedData(escalaId: string, distribuicoes: ViagemDistribu
       volume_m3, qtd_caixas, primeira_entrega, horario_primeira_entrega, horario_real_primeira_loja,
       status_primeira_loja, hora_ultima_loja, retorno_previsto, pirometro, placa_cavalo,
       placa_carreta, vinculo_gobrax, motorista_nome, motorista_restrito, ajudante_1,
-      ajudante_2, observacoes, data_saida_condutor, fornecedor_ajudante, valor_diaria, status_diaria, status_motorista, status_carregamento
+      ajudante_2, observacoes, data_saida_condutor, fornecedor_ajudante, valor_diaria, status_diaria, status_motorista, status_carregamento, ordem
     ) VALUES (
       $id, $escala_id, $embarque_cod, $rota, $tipo_veiculo, $doca, $hora_encoste_previsto,
       $hora_saida_motorista, $horario_saida_real, $justificativa_saida, $qtd_lojas, $lojas,
       $volume_m3, $qtd_caixas, $primeira_entrega, $horario_primeira_entrega, $horario_real_primeira_loja,
       $status_primeira_loja, $hora_ultima_loja, $retorno_previsto, $pirometro, $placa_cavalo,
       $placa_carreta, $vinculo_gobrax, $motorista_nome, $motorista_restrito, $ajudante_1,
-      $ajudante_2, $observacoes, $data_saida_condutor, $fornecedor_ajudante, $valor_diaria, $status_diaria, $status_motorista, $status_carregamento
+      $ajudante_2, $observacoes, $data_saida_condutor, $fornecedor_ajudante, $valor_diaria, $status_diaria, $status_motorista, $status_carregamento, $ordem
     )
   `);
 
@@ -508,7 +521,13 @@ export function saveImportedData(escalaId: string, distribuicoes: ViagemDistribu
   `);
 
   db.transaction(() => {
+    let idx = 0;
     for (const d of distribuicoes) {
+      idx++;
+      const itemOrdem = d.ordem !== undefined && d.ordem > 0 
+        ? (currentMaxOrdem + d.ordem) 
+        : (currentMaxOrdem + idx);
+
       insertDist.run({
         $id: d.id,
         $escala_id: escalaId,
@@ -544,7 +563,8 @@ export function saveImportedData(escalaId: string, distribuicoes: ViagemDistribu
         $valor_diaria: d.valor_diaria,
         $status_diaria: d.status_diaria,
         $status_motorista: d.status_motorista,
-        $status_carregamento: d.status_carregamento
+        $status_carregamento: d.status_carregamento,
+        $ordem: itemOrdem
       });
     }
 
@@ -587,24 +607,32 @@ export function saveImportedDataWithMode(
       db.query<{ rota: string }, [string]>('SELECT rota FROM viagem_distribuicao WHERE escala_id = ?')
         .all(escalaId).map(r => (r.rota || '').trim().toUpperCase()).filter(Boolean)
     );
-    const rotasTransfDb = new Set(
-      db.query<{ operacao_rota: string }, [string]>('SELECT operacao_rota FROM viagem_transferencia WHERE escala_id = ?')
-        .all(escalaId).map(r => (r.operacao_rota || '').trim().toUpperCase()).filter(Boolean)
+    const transfDbKeys = new Set(
+      db.query<{ operacao_rota: string; horario_pegada: string }, [string]>(
+        'SELECT operacao_rota, horario_pegada FROM viagem_transferencia WHERE escala_id = ?'
+      ).all(escalaId).map(t => `${(t.operacao_rota || '').trim().toUpperCase()}__${(t.horario_pegada || '').trim()}`)
     );
 
     distToSave = distribuicoes.filter(d => !rotasDistDb.has((d.rota || d.embarque_cod || '').trim().toUpperCase()));
-    transfToSave = transferencias.filter(t => !rotasTransfDb.has((t.operacao_rota || '').trim().toUpperCase()));
+    transfToSave = transferencias.filter(t => !transfDbKeys.has(`${(t.operacao_rota || '').trim().toUpperCase()}__${(t.horario_pegada || '').trim()}`));
   } else if (modo === 'SOBRESCREVER') {
     // Se sobrescrever, removemos as rotas conflitantes desta escala para que entrem limpas com os dados novos
     const rotasDistIncoming = distribuicoes.map(d => (d.rota || d.embarque_cod || '').trim().toUpperCase()).filter(Boolean);
-    const rotasTransfIncoming = transferencias.map(t => (t.operacao_rota || '').trim().toUpperCase()).filter(Boolean);
 
     db.transaction(() => {
       for (const rota of rotasDistIncoming) {
         db.query('DELETE FROM viagem_distribuicao WHERE escala_id = ? AND UPPER(rota) = ?').run(escalaId, rota);
       }
-      for (const rota of rotasTransfIncoming) {
-        db.query('DELETE FROM viagem_transferencia WHERE escala_id = ? AND UPPER(operacao_rota) = ?').run(escalaId, rota);
+      for (const t of transferencias) {
+        const rota = (t.operacao_rota || '').trim().toUpperCase();
+        const pegada = (t.horario_pegada || '').trim();
+        if (rota) {
+          if (pegada) {
+            db.query('DELETE FROM viagem_transferencia WHERE escala_id = ? AND UPPER(operacao_rota) = ? AND horario_pegada = ?').run(escalaId, rota, pegada);
+          } else {
+            db.query('DELETE FROM viagem_transferencia WHERE escala_id = ? AND UPPER(operacao_rota) = ?').run(escalaId, rota);
+          }
+        }
       }
     })();
   }
@@ -631,6 +659,14 @@ export function upsertDistribuicao(d: ViagemDistribuicao) {
     d.horario_real_primeira_loja || ''
   );
 
+  let ordem = d.ordem ?? 0;
+  if (!ordem) {
+    const existing = db.query<{ ordem: number }, [string]>('SELECT ordem FROM viagem_distribuicao WHERE id = ?').get(d.id);
+    if (existing && existing.ordem) {
+      ordem = existing.ordem;
+    }
+  }
+
   const stmt = db.prepare(`
     INSERT OR REPLACE INTO viagem_distribuicao (
       id, escala_id, embarque_cod, rota, tipo_veiculo, doca, hora_encoste_previsto,
@@ -638,14 +674,14 @@ export function upsertDistribuicao(d: ViagemDistribuicao) {
       volume_m3, qtd_caixas, primeira_entrega, horario_primeira_entrega, horario_real_primeira_loja,
       status_primeira_loja, hora_ultima_loja, retorno_previsto, pirometro, placa_cavalo,
       placa_carreta, vinculo_gobrax, motorista_nome, motorista_restrito, ajudante_1,
-      ajudante_2, observacoes, data_saida_condutor, fornecedor_ajudante, valor_diaria, status_diaria, status_motorista, status_carregamento
+      ajudante_2, observacoes, data_saida_condutor, fornecedor_ajudante, valor_diaria, status_diaria, status_motorista, status_carregamento, ordem
     ) VALUES (
       $id, $escala_id, $embarque_cod, $rota, $tipo_veiculo, $doca, $hora_encoste_previsto,
       $hora_saida_motorista, $horario_saida_real, $justificativa_saida, $qtd_lojas, $lojas,
       $volume_m3, $qtd_caixas, $primeira_entrega, $horario_primeira_entrega, $horario_real_primeira_loja,
       $status_primeira_loja, $hora_ultima_loja, $retorno_previsto, $pirometro, $placa_cavalo,
       $placa_carreta, $vinculo_gobrax, $motorista_nome, $motorista_restrito, $ajudante_1,
-      $ajudante_2, $observacoes, $data_saida_condutor, $fornecedor_ajudante, $valor_diaria, $status_diaria, $status_motorista, $status_carregamento
+      $ajudante_2, $observacoes, $data_saida_condutor, $fornecedor_ajudante, $valor_diaria, $status_diaria, $status_motorista, $status_carregamento, $ordem
     )
   `);
 
@@ -684,7 +720,8 @@ export function upsertDistribuicao(d: ViagemDistribuicao) {
     $valor_diaria: d.valor_diaria,
     $status_diaria: d.status_diaria,
     $status_motorista: d.status_motorista,
-    $status_carregamento: d.status_carregamento
+    $status_carregamento: d.status_carregamento,
+    $ordem: ordem
   });
 }
 
@@ -868,7 +905,7 @@ export function getEscalaPeriodo(inicio: string, fim: string): EscalaCompleta {
   }
 
   let distribuicoes = db.query<ViagemDistribuicao, []>(
-    `SELECT * FROM viagem_distribuicao WHERE escala_id IN (${escalaIds}) ORDER BY hora_encoste_previsto ASC`
+    `SELECT * FROM viagem_distribuicao WHERE escala_id IN (${escalaIds}) ORDER BY hora_encoste_previsto ASC, ordem ASC, rowid ASC`
   ).all();
 
   distribuicoes = distribuicoes.map((d: ViagemDistribuicao) => {

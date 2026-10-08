@@ -113,6 +113,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'xlsx' | 'pdf' | 'text' | 'ia'>('xlsx');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [pastedText, setPastedText] = useState('');
   const [iaJson, setIaJson] = useState('');
   const [copiedPrompt, setCopiedPrompt] = useState(false);
@@ -134,8 +135,10 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setSelectedFile(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      const files = Array.from(e.target.files);
+      setSelectedFiles(files);
+      setSelectedFile(files[0] || null);
       setMessage(null);
       setPreviaList(null);
     }
@@ -150,13 +153,15 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       let res: Response;
 
       if (activeTab === 'xlsx' || activeTab === 'pdf') {
-        if (!selectedFile) {
-          setMessage({ type: 'error', text: 'Selecione um arquivo para analisar.' });
+        const filesToUpload = selectedFiles.length > 0 ? selectedFiles : (selectedFile ? [selectedFile] : []);
+        if (filesToUpload.length === 0) {
+          setMessage({ type: 'error', text: 'Selecione ao menos um arquivo para analisar.' });
           setIsLoading(false);
           return;
         }
         const formData = new FormData();
-        formData.append('file', selectedFile);
+        filesToUpload.forEach(f => formData.append('files', f));
+        formData.append('file', filesToUpload[0]);
         formData.append('tipo', activeTab);
         res = await fetch(`/api/import/previa?data=${dataOperacao}`, {
           method: 'POST',
@@ -234,6 +239,17 @@ export const ImportModal: React.FC<ImportModalProps> = ({
           });
         }
 
+        // Ordenar os itens da prévia: rotas de distribuição seguindo cronologia de encoste e sequência original do PDF
+        items.sort((a, b) => {
+          if (a.tipo !== b.tipo) return a.tipo === 'DIST' ? -1 : 1;
+          const encA = a.hora || '99:99';
+          const encB = b.hora || '99:99';
+          if (encA !== encB) return encA.localeCompare(encB);
+          const ordA = a.raw?.ordem ?? 999999;
+          const ordB = b.raw?.ordem ?? 999999;
+          return ordA - ordB;
+        });
+
         if (items.length === 0) {
           setMessage({
             type: 'warning',
@@ -267,9 +283,10 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     setIsLoading(true);
     setMessage(null);
 
-    const distToSave = selecionados.filter(p => p.tipo === 'DIST').map(p => ({
+    const distToSave = selecionados.filter(p => p.tipo === 'DIST').map((p, idx) => ({
       ...p.raw,
-      embarque_cod: '' // SEM EMBARQUE por padrão, inserido manualmente pelo operador
+      embarque_cod: '', // SEM EMBARQUE por padrão, inserido manualmente pelo operador
+      ordem: p.raw?.ordem ?? (idx + 1)
     }));
     const transfToSave = selecionados.filter(p => p.tipo === 'TRANSF').map(p => p.raw);
 
@@ -671,30 +688,40 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                 <div className="border border-dashed border-white/[0.15] hover:border-emerald-500/60 rounded-xl p-6 text-center cursor-pointer transition bg-zinc-950/60 relative group">
                   <input
                     type="file"
+                    multiple
                     accept={activeTab === 'xlsx' ? '.xlsx, .xls' : '.pdf'}
                     onChange={handleFileChange}
                     className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
                   />
                   <Upload className="w-7 h-7 text-zinc-500 group-hover:text-emerald-400 mx-auto mb-2 transition" />
                   <p className="text-xs text-zinc-200 font-medium">
-                    {selectedFile ? selectedFile.name : `Arraste o arquivo ${activeTab.toUpperCase()} ou clique para selecionar`}
+                    {selectedFiles.length > 1
+                      ? `${selectedFiles.length} arquivos selecionados: ${selectedFiles.map(f => f.name).join(', ')}`
+                      : selectedFile 
+                        ? selectedFile.name 
+                        : `Arraste o arquivo ${activeTab.toUpperCase()} ou clique para selecionar (suporta múltiplos PDFs)`}
                   </p>
+                  {selectedFiles.length > 1 && (
+                    <p className="text-[10px] text-emerald-400 font-medium mt-1">
+                      ✓ A importação manterá rigorosamente a ordem dos arquivos selecionados
+                    </p>
+                  )}
                   <p className="text-[11px] text-zinc-500 mt-1">
                     Data alvo: <span className="text-emerald-400 font-mono font-semibold">{dataOperacao}</span>
                   </p>
                 </div>
 
                 <p className="text-[11px] text-zinc-400 leading-relaxed">
-                  🛡️ <strong>Prévia segura:</strong> O arquivo será analisado e uma tabela com todas as rotas identificadas será exibida para sua conferência antes de salvar no sistema.
+                  🛡️ <strong>Prévia segura:</strong> {activeTab === 'pdf' ? 'Você pode selecionar um ou vários arquivos de preliminares. As rotas serão organizadas exatamente na ordem dos documentos.' : 'O arquivo será analisado e uma tabela com todas as rotas identificadas será exibida para sua conferência antes de salvar no sistema.'}
                 </p>
 
                 <button
                   onClick={handleGerarPrevia}
-                  disabled={isLoading || !selectedFile}
+                  disabled={isLoading || (!selectedFile && selectedFiles.length === 0)}
                   className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-zinc-950 rounded-xl text-xs font-bold shadow-glow-emerald transition flex items-center justify-center gap-2 active:scale-95"
                 >
                   {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4 stroke-[2.5]" />}
-                  <span>{isLoading ? 'Analisando arquivo...' : 'Analisar e Gerar Prévia'}</span>
+                  <span>{isLoading ? 'Analisando arquivo(s)...' : `Analisar e Gerar Prévia ${selectedFiles.length > 1 ? `(${selectedFiles.length} arquivos)` : ''}`}</span>
                 </button>
               </div>
             )}

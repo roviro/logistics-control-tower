@@ -15,7 +15,8 @@ import {
   Filter,
   Radio,
   DollarSign,
-  RotateCcw
+  RotateCcw,
+  Copy
 } from 'lucide-react';
 import { ViagemTransferencia, StatusOperacionalTransferencia } from '../types';
 import { calcularDuracao, calcularHorarioLimite, avaliarStatusJornada, BASE_PLACAS_CONHECIDAS } from '../utils/jornada';
@@ -138,6 +139,27 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
     setIsAdding(false);
   };
 
+  const handleReuseRoute = (item: ViagemTransferencia) => {
+    const now = new Date();
+    const horaAgora = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    setNewForm({
+      operacao_rota: item.operacao_rota,
+      motorista_nome: '',
+      placa: item.placa || '',
+      placa_carreta: item.placa_carreta || '',
+      vinculo_gobrax: item.vinculo_gobrax || 'DESVINCULADO',
+      horario_pegada: horaAgora,
+      horario_fim: '',
+      limite_horas: item.limite_horas || '11:20',
+      status_operacional: 'INICIANDO',
+      valor_diaria: item.valor_diaria || 0,
+      status_diaria: 'Pendente',
+      observacoes_transferencia: `Nova viagem na rota ${item.operacao_rota}`
+    });
+    setIsAdding(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const handleStartEdit = (item: ViagemTransferencia) => {
     setEditingId(item.id);
     setEditForm({ ...item });
@@ -148,9 +170,18 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
     if (!original) return;
 
     const pegada = editForm.horario_pegada || original.horario_pegada;
-    const fim = editForm.horario_fim ?? original.horario_fim;
+    let fim = editForm.horario_fim ?? original.horario_fim;
     const limiteHoras = editForm.limite_horas || original.limite_horas || '11:20';
-    const statusOp = editForm.status_operacional || original.status_operacional;
+    let statusOp = editForm.status_operacional || original.status_operacional;
+
+    // Se a pegada mudou na edição e a viagem estava finalizada ou com fim anterior residual
+    if (pegada !== original.horario_pegada && (original.status_operacional === 'FINALIZADO' || original.horario_fim)) {
+      if (editForm.horario_fim === original.horario_fim) {
+        fim = '';
+        statusOp = 'INICIANDO';
+      }
+    }
+
     const limite = calcularHorarioLimite(pegada, limiteHoras);
     const { status: statusJornada } = avaliarStatusJornada(pegada, fim, limiteHoras, statusOp);
     const duracao = calcularDuracao(pegada, fim);
@@ -164,6 +195,7 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
       horario_fim: fim,
       horario_limite: limite,
       limite_horas: limiteHoras,
+      status_operacional: statusOp,
       status_jornada: statusJornada,
       duracao_horas: duracao,
       valor_diaria: Number(editForm.valor_diaria ?? original.valor_diaria) || 0,
@@ -182,17 +214,29 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
     value: any,
     immediate = false
   ) => {
-    const updated: ViagemTransferencia = {
+    let updated: ViagemTransferencia = {
       ...item,
       [field]: value,
       ultima_atualizacao: new Date().toISOString()
     };
 
     if (field === 'horario_pegada' || field === 'horario_fim' || field === 'limite_horas' || field === 'status_operacional') {
-      const pegada = field === 'horario_pegada' ? value : item.horario_pegada;
-      const fim = field === 'horario_fim' ? value : item.horario_fim;
+      let pegada = field === 'horario_pegada' ? value : item.horario_pegada;
+      let fim = field === 'horario_fim' ? value : item.horario_fim;
       const limiteHoras = field === 'limite_horas' ? value : (item.limite_horas || '11:20');
-      const statusOp = field === 'status_operacional' ? value : item.status_operacional;
+      let statusOp = field === 'status_operacional' ? value : item.status_operacional;
+
+      // Se alterou a pegada (reutilização de linha / novo turno):
+      // Limpa horário de fim residual anterior e redefine para INICIANDO se estava FINALIZADO ou tinha fim preenchido
+      if (field === 'horario_pegada' && value !== item.horario_pegada) {
+        if (item.status_operacional === 'FINALIZADO' || item.horario_fim) {
+          fim = '';
+          statusOp = 'INICIANDO';
+          updated.horario_fim = '';
+          updated.status_operacional = 'INICIANDO';
+        }
+      }
+
       updated.horario_limite = calcularHorarioLimite(pegada, limiteHoras);
       const { status } = avaliarStatusJornada(pegada, fim, limiteHoras, statusOp);
       updated.status_jornada = status;
@@ -919,7 +963,15 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
                             className="bg-zinc-950 border border-white/[0.1] rounded px-1 py-0.5 text-zinc-100 w-16"
                           />
                         ) : (
-                          item.horario_pegada
+                          <input
+                            type="time"
+                            value={item.horario_pegada || ''}
+                            onChange={(e) => handleQuickInlineUpdate(item, 'horario_pegada', e.target.value)}
+                            onBlur={(e) => handleQuickInlineUpdate(item, 'horario_pegada', e.target.value, true)}
+                            className="bg-transparent hover:bg-zinc-950 border border-transparent hover:border-white/[0.1] rounded px-1 py-0.5 font-mono text-zinc-200 w-20 transition"
+                            title="Clique para alterar horário da pegada (redefine jornada para INICIANDO)"
+                            aria-label={`Horário de pegada da transferência ${item.operacao_rota}`}
+                          />
                         )}
                       </td>
 
@@ -1073,6 +1125,14 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
                               title="Editar Linha"
                             >
                               <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleReuseRoute(item)}
+                              className="p-1 rounded hover:bg-emerald-950/40 text-zinc-400 hover:text-emerald-400 transition"
+                              title="Reutilizar Rota (Nova Viagem neste Rota)"
+                              aria-label={`Reutilizar rota ${item.operacao_rota}`}
+                            >
+                              <Copy className="w-3.5 h-3.5" />
                             </button>
                             <button
                               onClick={() => onDelete(item.id)}

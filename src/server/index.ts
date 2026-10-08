@@ -308,24 +308,44 @@ const server = Bun.serve({
           const contentType = req.headers.get('content-type') || '';
           if (contentType.includes('multipart/form-data')) {
             const formData = await req.formData();
-            const file = formData.get('file') as File | null;
-            const tipo = (formData.get('tipo') as string) || (file?.name.endsWith('.pdf') ? 'pdf' : 'xlsx');
-            if (!file) {
+            const allFiles = formData.getAll('files') as File[];
+            const singleFile = formData.get('file') as File | null;
+            const filesToProcess = allFiles.length > 0 ? allFiles : (singleFile ? [singleFile] : []);
+
+            if (filesToProcess.length === 0) {
               return Response.json({ error: 'Nenhum arquivo enviado' }, { status: 400, headers: corsHeaders });
             }
-            if (file.size > 25 * 1024 * 1024) {
-              return Response.json({ error: 'Arquivo excede o limite máximo permitido de 25MB.' }, { status: 413, headers: corsHeaders });
-            }
-            if (tipo === 'pdf' || file.name.endsWith('.pdf')) {
-              const buffer = Buffer.from(await file.arrayBuffer());
-              const parsed = await parsePdfBuffer(buffer, escala.id);
-              distribuicoes = parsed.distribuicoes;
-              transferencias = parsed.transferencias;
-            } else {
-              const buffer = await file.arrayBuffer();
-              const parsed = parseXlsxBuffer(buffer, escala.id);
-              distribuicoes = parsed.distribuicoes;
-              transferencias = parsed.transferencias;
+
+            let cumulativeOrdem = 0;
+            for (const file of filesToProcess) {
+              if (file.size > 25 * 1024 * 1024) {
+                return Response.json({ error: `Arquivo ${file.name} excede o limite máximo permitido de 25MB.` }, { status: 413, headers: corsHeaders });
+              }
+              const tipo = (formData.get('tipo') as string) || (file.name.endsWith('.pdf') ? 'pdf' : 'xlsx');
+              let fileDist: any[] = [];
+              let fileTransf: any[] = [];
+
+              if (tipo === 'pdf' || file.name.endsWith('.pdf')) {
+                const buffer = Buffer.from(await file.arrayBuffer());
+                const parsed = await parsePdfBuffer(buffer, escala.id);
+                fileDist = parsed.distribuicoes;
+                fileTransf = parsed.transferencias;
+              } else {
+                const buffer = await file.arrayBuffer();
+                const parsed = parseXlsxBuffer(buffer, escala.id);
+                fileDist = parsed.distribuicoes;
+                fileTransf = parsed.transferencias;
+              }
+
+              for (const d of fileDist) {
+                cumulativeOrdem++;
+                d.ordem = cumulativeOrdem;
+                distribuicoes.push(d);
+              }
+
+              for (const t of fileTransf) {
+                transferencias.push(t);
+              }
             }
           } else {
             const body = await req.json();
