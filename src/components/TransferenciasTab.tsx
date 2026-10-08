@@ -237,10 +237,16 @@ export const TransferenciasTab: React.FC<TransferenciasTabProps> = ({
         }
       }
 
-      updated.horario_limite = calcularHorarioLimite(pegada, limiteHoras);
-      const { status } = avaliarStatusJornada(pegada, fim, limiteHoras, statusOp);
-      updated.status_jornada = status;
-      updated.duracao_horas = calcularDuracao(pegada, fim);
+      // Validação de horário válido antes de calcular jornada
+      const isValidPegada = pegada && /^[0-2]?[0-9]:[0-5][0-9]$/.test(pegada);
+      if (isValidPegada) {
+        updated.horario_limite = calcularHorarioLimite(pegada, limiteHoras);
+        const { status } = avaliarStatusJornada(pegada, fim, limiteHoras, statusOp);
+        updated.status_jornada = status;
+        updated.duracao_horas = calcularDuracao(pegada, fim);
+      } else {
+        updated.status_jornada = 'SEM ESTOURO';
+      }
     }
 
     const timerKey = `${item.id}_${String(field)}`;

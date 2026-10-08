@@ -17,7 +17,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 import { ViagemDistribuicao } from '../types';
-import { BASE_PLACAS_CONHECIDAS, avaliarConformidadePrimeiraLoja } from '../utils/jornada';
+import { BASE_PLACAS_CONHECIDAS, avaliarConformidadePrimeiraLoja, getEncosteOperationalMinutes } from '../utils/jornada';
 
 interface DistribuicaoTabProps {
   distribuicoes: ViagemDistribuicao[];
@@ -38,6 +38,19 @@ export const DistribuicaoTab: React.FC<DistribuicaoTabProps> = ({
   const [docaFilter, setDocaFilter] = useState('TODAS');
   const [statusCarregamentoFilter, setStatusCarregamentoFilter] = useState('TODOS');
   const [filterSpecial, setFilterSpecial] = useState<'TODOS' | 'SEM_EMBARQUE' | 'ATRASO_1LOJA' | 'RESTRITOS' | 'GOBRAX_PENDENTE'>(initialFilterSpecial);
+
+  // Ordenação Interativa de Colunas
+  const [sortField, setSortField] = useState<string>('ENCOSTE');
+  const [sortAsc, setSortAsc] = useState<boolean>(true);
+
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortField(field);
+      setSortAsc(true);
+    }
+  };
 
   // Filtros Avançados por Coluna (Item 6)
   const [showColFilters, setShowColFilters] = useState(false);
@@ -269,11 +282,39 @@ export const DistribuicaoTab: React.FC<DistribuicaoTabProps> = ({
     return matchesSearch && matchesDoca && matchesStatus && matchesSpecial;
   });
 
-  // Ordenação Padrão por Horário de Encoste e Ordem original do PDF (Item 9)
+  // Ordenação Operacional Padrão (Horário de Encoste do CD 11:00 -> 09:00 e Ordem original do PDF) ou por Coluna Selecionada
   const sortedAndFiltered = [...filtered].sort((a, b) => {
-    const encA = a.hora_encoste_previsto || '99:99';
-    const encB = b.hora_encoste_previsto || '99:99';
-    if (encA !== encB) return encA.localeCompare(encB);
+    let comparison = 0;
+
+    if (sortField === 'ENCOSTE') {
+      const minA = getEncosteOperationalMinutes(a.hora_encoste_previsto);
+      const minB = getEncosteOperationalMinutes(b.hora_encoste_previsto);
+      comparison = minA - minB;
+    } else if (sortField === 'DOCA') {
+      const docaA = parseInt(a.doca, 10) || 999;
+      const docaB = parseInt(b.doca, 10) || 999;
+      comparison = docaA - docaB;
+    } else if (sortField === 'ROTA') {
+      comparison = (a.rota || '').localeCompare(b.rota || '');
+    } else if (sortField === 'EMBARQUE') {
+      comparison = (a.embarque_cod || '').localeCompare(b.embarque_cod || '');
+    } else if (sortField === 'MOTORISTA') {
+      comparison = (a.motorista_nome || '').localeCompare(b.motorista_nome || '');
+    } else if (sortField === 'VEICULO') {
+      comparison = (a.tipo_veiculo || '').localeCompare(b.tipo_veiculo || '');
+    } else if (sortField === 'CAIXAS') {
+      comparison = (a.qtd_caixas || 0) - (b.qtd_caixas || 0);
+    } else if (sortField === 'SAIDA') {
+      comparison = (a.horario_saida_real || a.hora_saida_motorista || '').localeCompare(b.horario_saida_real || b.hora_saida_motorista || '');
+    } else if (sortField === 'STATUS') {
+      comparison = (a.status_carregamento || '').localeCompare(b.status_carregamento || '');
+    }
+
+    if (comparison !== 0) {
+      return sortAsc ? comparison : -comparison;
+    }
+
+    // Desempate padrão: ordem original do PDF e Doca
     const ordA = a.ordem !== undefined && a.ordem !== null ? a.ordem : 999999;
     const ordB = b.ordem !== undefined && b.ordem !== null ? b.ordem : 999999;
     if (ordA !== ordB) return ordA - ordB;
@@ -670,22 +711,105 @@ export const DistribuicaoTab: React.FC<DistribuicaoTabProps> = ({
 
             <thead>
               <tr className="bg-zinc-950/80 text-zinc-400 border-b border-white/[0.08] font-semibold uppercase tracking-wider text-[9px] 2xl:text-[10px]">
-                <th className="py-2.5 px-1 text-center font-bold">Embarque</th>
-                <th className="py-2.5 px-0.5 text-center font-bold">Doca</th>
-                <th className="py-2.5 px-0.5 text-center font-bold">Encoste</th>
-                <th className="py-2.5 px-1 font-bold">Rota</th>
+                <th 
+                  onClick={() => handleSort('EMBARQUE')}
+                  className="py-2.5 px-1 text-center font-bold cursor-pointer hover:text-zinc-200 transition select-none"
+                  title="Ordenar por Embarque"
+                >
+                  <span className="inline-flex items-center justify-center gap-0.5">
+                    Embarque
+                    {sortField === 'EMBARQUE' && (sortAsc ? ' ▲' : ' ▼')}
+                  </span>
+                </th>
+                <th 
+                  onClick={() => handleSort('DOCA')}
+                  className="py-2.5 px-0.5 text-center font-bold cursor-pointer hover:text-zinc-200 transition select-none"
+                  title="Ordenar por Doca"
+                >
+                  <span className="inline-flex items-center justify-center gap-0.5">
+                    Doca
+                    {sortField === 'DOCA' && (sortAsc ? ' ▲' : ' ▼')}
+                  </span>
+                </th>
+                <th 
+                  onClick={() => handleSort('ENCOSTE')}
+                  className={`py-2.5 px-0.5 text-center font-bold cursor-pointer hover:text-zinc-200 transition select-none ${
+                    sortField === 'ENCOSTE' ? 'text-purple-400 font-extrabold' : ''
+                  }`}
+                  title="Ordenar por Horário de Encoste Operacional (11h -> 09h)"
+                >
+                  <span className="inline-flex items-center justify-center gap-0.5">
+                    Encoste
+                    {sortField === 'ENCOSTE' && (sortAsc ? ' ▲' : ' ▼')}
+                  </span>
+                </th>
+                <th 
+                  onClick={() => handleSort('ROTA')}
+                  className="py-2.5 px-1 font-bold cursor-pointer hover:text-zinc-200 transition select-none"
+                  title="Ordenar por Rota"
+                >
+                  <span className="inline-flex items-center gap-0.5">
+                    Rota
+                    {sortField === 'ROTA' && (sortAsc ? ' ▲' : ' ▼')}
+                  </span>
+                </th>
                 <th className="py-2.5 px-1.5 font-bold">Lojas (Sequência)</th>
                 <th className="py-2.5 px-1 text-center font-bold">1ª Loja (Prev/Real)</th>
-                <th className="py-2.5 px-1 text-center font-bold">Veículo</th>
+                <th 
+                  onClick={() => handleSort('VEICULO')}
+                  className="py-2.5 px-1 text-center font-bold cursor-pointer hover:text-zinc-200 transition select-none"
+                  title="Ordenar por Veículo"
+                >
+                  <span className="inline-flex items-center justify-center gap-0.5">
+                    Veículo
+                    {sortField === 'VEICULO' && (sortAsc ? ' ▲' : ' ▼')}
+                  </span>
+                </th>
                 <th className="py-2.5 px-1 font-bold">Placas</th>
                 <th className="py-2.5 px-0.5 text-center font-bold">Gobrax</th>
-                <th className="py-2.5 px-1 font-bold">Motorista</th>
+                <th 
+                  onClick={() => handleSort('MOTORISTA')}
+                  className="py-2.5 px-1 font-bold cursor-pointer hover:text-zinc-200 transition select-none"
+                  title="Ordenar por Motorista"
+                >
+                  <span className="inline-flex items-center gap-0.5">
+                    Motorista
+                    {sortField === 'MOTORISTA' && (sortAsc ? ' ▲' : ' ▼')}
+                  </span>
+                </th>
                 <th className="py-2.5 px-1 text-center font-bold text-sky-400">Ajudante</th>
                 <th className="py-2.5 px-0.5 text-center font-bold">Pirôm.</th>
-                <th className="py-2.5 px-0.5 text-center font-bold">Cx</th>
-                <th className="py-2.5 px-0.5 text-center font-bold">Saída</th>
+                <th 
+                  onClick={() => handleSort('CAIXAS')}
+                  className="py-2.5 px-0.5 text-center font-bold cursor-pointer hover:text-zinc-200 transition select-none"
+                  title="Ordenar por Caixas"
+                >
+                  <span className="inline-flex items-center justify-center gap-0.5">
+                    Cx
+                    {sortField === 'CAIXAS' && (sortAsc ? ' ▲' : ' ▼')}
+                  </span>
+                </th>
+                <th 
+                  onClick={() => handleSort('SAIDA')}
+                  className="py-2.5 px-0.5 text-center font-bold cursor-pointer hover:text-zinc-200 transition select-none"
+                  title="Ordenar por Saída"
+                >
+                  <span className="inline-flex items-center justify-center gap-0.5">
+                    Saída
+                    {sortField === 'SAIDA' && (sortAsc ? ' ▲' : ' ▼')}
+                  </span>
+                </th>
                 <th className="py-2.5 px-1 text-center font-bold text-emerald-400">Diária</th>
-                <th className="py-2.5 px-1 text-center font-bold">Status</th>
+                <th 
+                  onClick={() => handleSort('STATUS')}
+                  className="py-2.5 px-1 text-center font-bold cursor-pointer hover:text-zinc-200 transition select-none"
+                  title="Ordenar por Status"
+                >
+                  <span className="inline-flex items-center justify-center gap-0.5">
+                    Status
+                    {sortField === 'STATUS' && (sortAsc ? ' ▲' : ' ▼')}
+                  </span>
+                </th>
                 <th className="py-2.5 px-0.5 text-center"></th>
               </tr>
 

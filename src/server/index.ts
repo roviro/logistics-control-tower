@@ -27,6 +27,7 @@ import {
   db
 } from './db';
 import { UsuarioLogado } from '../types';
+import { getEncosteOperationalMinutes } from '../utils/jornada';
 import { parseXlsxBuffer, parsePdfBuffer, parseRawText, parseStructuredAiJson } from './parsers';
 import * as XLSX from 'xlsx';
 import path from 'path';
@@ -316,8 +317,9 @@ const server = Bun.serve({
               return Response.json({ error: 'Nenhum arquivo enviado' }, { status: 400, headers: corsHeaders });
             }
 
-            let cumulativeOrdem = 0;
-            for (const file of filesToProcess) {
+            const rawDistList: any[] = [];
+            for (let fIdx = 0; fIdx < filesToProcess.length; fIdx++) {
+              const file = filesToProcess[fIdx];
               if (file.size > 25 * 1024 * 1024) {
                 return Response.json({ error: `Arquivo ${file.name} excede o limite máximo permitido de 25MB.` }, { status: 413, headers: corsHeaders });
               }
@@ -338,15 +340,31 @@ const server = Bun.serve({
               }
 
               for (const d of fileDist) {
-                cumulativeOrdem++;
-                d.ordem = cumulativeOrdem;
-                distribuicoes.push(d);
+                rawDistList.push({ ...d, _fileIndex: fIdx });
               }
 
               for (const t of fileTransf) {
                 transferencias.push(t);
               }
             }
+
+            // Ordenação operacional de encoste do CD (11:00 -> 09:00):
+            // Rotas de arquivos distintos com o mesmo horário de encoste (ex: rotas às 15:00) ficam agrupadas lado a lado!
+            rawDistList.sort((a, b) => {
+              const minA = getEncosteOperationalMinutes(a.hora_encoste_previsto);
+              const minB = getEncosteOperationalMinutes(b.hora_encoste_previsto);
+              if (minA !== minB) return minA - minB;
+              if (a._fileIndex !== b._fileIndex) return a._fileIndex - b._fileIndex;
+              return (a.ordem || 0) - (b.ordem || 0);
+            });
+
+            distribuicoes = rawDistList.map((d, index) => {
+              const { _fileIndex, ...rest } = d;
+              return {
+                ...rest,
+                ordem: index + 1
+              };
+            });
           } else {
             const body = await req.json();
             if (body.tipo === 'ia' || body.json) {

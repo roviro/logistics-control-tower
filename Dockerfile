@@ -1,6 +1,9 @@
 FROM oven/bun:alpine AS base
 WORKDIR /app
 
+RUN apk add --no-cache tzdata
+ENV TZ=America/Sao_Paulo
+
 # Instalar dependências
 COPY package.json bun.lock* ./
 RUN bun install --frozen-lockfile || bun install

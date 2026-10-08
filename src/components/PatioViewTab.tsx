@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Printer, Search, Truck, Radio, Clock, ArrowDownUp, ShieldCheck } from 'lucide-react';
 import { ViagemDistribuicao, ViagemTransferencia } from '../types';
+import { getEncosteOperationalMinutes } from '../utils/jornada';
 
 interface PatioViewTabProps {
   distribuicoes: ViagemDistribuicao[];
@@ -19,12 +20,12 @@ export const PatioViewTab: React.FC<PatioViewTabProps> = ({
   const [showSection, setShowSection] = useState<'TODOS' | 'DISTRIBUICAO' | 'TRANSFERENCIA'>('TODOS');
   const [sortBy, setSortBy] = useState<'ENCOSTE' | 'DOCA'>('ENCOSTE');
 
-  // Ordenação flexível para o Pátio: por Horário de Encoste (padrão) ou Doca
+  // Ordenação flexível para o Pátio: por Horário de Encoste Operacional (padrão) ou Doca
   const sortedDist = [...distribuicoes].sort((a, b) => {
     if (sortBy === 'ENCOSTE') {
-      const encA = a.hora_encoste_previsto || '99:99';
-      const encB = b.hora_encoste_previsto || '99:99';
-      if (encA !== encB) return encA.localeCompare(encB);
+      const minA = getEncosteOperationalMinutes(a.hora_encoste_previsto);
+      const minB = getEncosteOperationalMinutes(b.hora_encoste_previsto);
+      if (minA !== minB) return minA - minB;
       const ordA = a.ordem !== undefined && a.ordem !== null ? a.ordem : 999999;
       const ordB = b.ordem !== undefined && b.ordem !== null ? b.ordem : 999999;
       if (ordA !== ordB) return ordA - ordB;
@@ -35,7 +36,7 @@ export const PatioViewTab: React.FC<PatioViewTabProps> = ({
       const docaA = parseInt(a.doca, 10) || 999;
       const docaB = parseInt(b.doca, 10) || 999;
       if (docaA !== docaB) return docaA - docaB;
-      return (a.hora_encoste_previsto || '').localeCompare(b.hora_encoste_previsto || '');
+      return getEncosteOperationalMinutes(a.hora_encoste_previsto) - getEncosteOperationalMinutes(b.hora_encoste_previsto);
     }
   });
 

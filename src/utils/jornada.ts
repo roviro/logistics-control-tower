@@ -76,6 +76,41 @@ export function avaliarConformidadePrimeiraLoja(
   }
 }
 
+/**
+ * Retorna a hora atual no fuso horário oficial de Brasília (America/Sao_Paulo).
+ * Garante exatidão mesmo quando o servidor hospedeiro roda em UTC (AWS Lightsail, Docker, etc.).
+ */
+export function getBrasiliaTimeStr(): string {
+  try {
+    return new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).format(new Date());
+  } catch {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  }
+}
+
+/**
+ * Retorna os minutos do horário de encoste ajustado para o ciclo operacional do CD.
+ * O ciclo logístico de distribuição inicia por volta das 10h/11h da manhã e estende-se
+ * pela tarde, noite e cruza a madrugada até a manhã seguinte (09:59).
+ * Horários de 00:00 a 09:59 são somados de 24h (+1440 min) para figurarem
+ * na sequência cronológica natural após os carregamentos da tarde e noite.
+ */
+export function getEncosteOperationalMinutes(timeStr?: string, cutoffHour: number = 10): number {
+  if (!timeStr || !timeStr.includes(':')) return 99999;
+  const parts = timeStr.trim().split(':');
+  const h = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10) || 0;
+  if (isNaN(h)) return 99999;
+  const adjustedHour = h < cutoffHour ? h + 24 : h;
+  return adjustedHour * 60 + m;
+}
+
 export function avaliarStatusJornada(
   horarioPegada: string,
   horarioFim: string = '',
@@ -137,17 +172,18 @@ export function avaliarStatusJornada(
     if (currentTimeStr && currentTimeStr.includes(':')) {
       currentMin = timeToMinutes(currentTimeStr);
     } else {
-      const now = new Date();
-      currentMin = now.getHours() * 60 + now.getMinutes();
+      // Obter horário atual no fuso de Brasília (America/Sao_Paulo) de forma segura em qualquer servidor
+      currentMin = timeToMinutes(getBrasiliaTimeStr());
     }
 
     if (currentMin >= pegadaMin) {
       tempoDecorridoMin = currentMin - pegadaMin;
     } else {
       // A hora atual é menor que a hora de pegada.
-      // Caso 1: Viagem agendada para mais tarde hoje (ex: agora 08:00 e pegada 20:00).
-      // Caso 2: Viagem iniciada ontem que cruzou a madrugada (ex: pegada 22:00 e agora 04:00).
-      // Somente computar overnight se estiver expressamente em trânsito e dentro de uma margem aceitável.
+      // Caso 1: Viagem agendada para mais tarde hoje (ex: agora 14:00 e pegada 20:00).
+      // Caso 2: Viagem iniciada ontem à noite que cruzou a madrugada (ex: pegada 22:00 e agora 04:00).
+      // Somente computar overnight se o horário atual for na madrugada/manhã (<= 10:00),
+      // a pegada tiver ocorrido à noite (>= 18:00) e o status for em trânsito.
       const isEmTransito = statusOperacional && (
         statusOperacional === 'EM TRANSITO' || 
         statusOperacional.includes('SENTIDO') || 
@@ -156,8 +192,11 @@ export function avaliarStatusJornada(
         statusOperacional === 'CHEGOU NO LOCAL'
       );
 
+      const isMadrugadaManha = currentMin <= 600; // até 10:00
+      const isPegadaNoite = pegadaMin >= 1080;    // a partir das 18:00
       const diffOvernight = (currentMin + 1440) - pegadaMin;
-      if (isEmTransito && diffOvernight <= duracaoLimiteMin + 180) {
+
+      if (isEmTransito && isMadrugadaManha && isPegadaNoite && diffOvernight <= duracaoLimiteMin + 120) {
         tempoDecorridoMin = diffOvernight;
       } else {
         tempoDecorridoMin = 0;

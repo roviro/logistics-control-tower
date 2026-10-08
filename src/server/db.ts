@@ -17,7 +17,9 @@ import {
   avaliarStatusJornada, 
   calcularRetornoPrevisto, 
   avaliarTemperaturaCross,
-  avaliarConformidadePrimeiraLoja
+  avaliarConformidadePrimeiraLoja,
+  getEncosteOperationalMinutes,
+  timeToMinutes
 } from '../utils/jornada';
 import path from 'path';
 import fs from 'fs';
@@ -255,6 +257,19 @@ export function getEscalaCompleta(dataOperacao: string): EscalaCompleta {
       vinculo_gobrax: d.vinculo_gobrax || 'DESVINCULADO',
       motorista_restrito: Boolean(d.motorista_restrito)
     };
+  });
+
+  // Ordenação operacional rigorosa por Horário de Encoste do CD (11:00 -> 09:00), ordem do PDF e doca
+  distribuicoes.sort((a: ViagemDistribuicao, b: ViagemDistribuicao) => {
+    const minA = getEncosteOperationalMinutes(a.hora_encoste_previsto);
+    const minB = getEncosteOperationalMinutes(b.hora_encoste_previsto);
+    if (minA !== minB) return minA - minB;
+    const ordA = a.ordem !== undefined && a.ordem !== null ? a.ordem : 999999;
+    const ordB = b.ordem !== undefined && b.ordem !== null ? b.ordem : 999999;
+    if (ordA !== ordB) return ordA - ordB;
+    const docaA = parseInt(a.doca, 10) || 999;
+    const docaB = parseInt(b.doca, 10) || 999;
+    return docaA - docaB;
   });
 
   let transferencias = db.query<ViagemTransferencia, [string]>(
@@ -730,10 +745,26 @@ export function deleteDistribuicao(id: string) {
 }
 
 export function upsertTransferencia(t: ViagemTransferencia) {
-  const duracao = calcularDuracao(t.horario_pegada, t.horario_fim);
+  let horarioFim = t.horario_fim || '';
+  let statusOperacional = t.status_operacional || 'INICIANDO';
+
+  // Proteção para reutilização de linhas de transferência:
+  // Se o fim registrado for resíduo incompatível de viagem anterior (>16h diferença), limpa o fim
+  if (t.horario_pegada && horarioFim) {
+    const pegadaMin = timeToMinutes(t.horario_pegada);
+    const fimMin = timeToMinutes(horarioFim);
+    if (fimMin < pegadaMin && (fimMin + 1440 - pegadaMin) > 960) {
+      horarioFim = '';
+      if (statusOperacional === 'FINALIZADO') {
+        statusOperacional = 'INICIANDO';
+      }
+    }
+  }
+
+  const duracao = calcularDuracao(t.horario_pegada, horarioFim);
   const limiteHoras = t.limite_horas || '11:20';
   const horarioLimite = calcularHorarioLimite(t.horario_pegada, limiteHoras);
-  const { status: statusJornada } = avaliarStatusJornada(t.horario_pegada, t.horario_fim, limiteHoras, undefined, t.status_operacional);
+  const { status: statusJornada } = avaliarStatusJornada(t.horario_pegada, horarioFim, limiteHoras, undefined, statusOperacional);
 
   const stmt = db.prepare(`
     INSERT OR REPLACE INTO viagem_transferencia (

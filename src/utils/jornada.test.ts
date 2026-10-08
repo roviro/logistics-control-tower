@@ -1,7 +1,28 @@
 import { describe, expect, it } from 'bun:test';
-import { avaliarStatusJornada } from './jornada';
+import { avaliarStatusJornada, getEncosteOperationalMinutes, getBrasiliaTimeStr } from './jornada';
 
 describe('Jornada e Transferências - Testes de Regra de Negócio', () => {
+  it('deve retornar hora atual de Brasília em formato HH:MM', () => {
+    const brt = getBrasiliaTimeStr();
+    expect(brt).toMatch(/^[0-2][0-9]:[0-5][0-9]$/);
+  });
+
+  it('deve ordenar o ciclo operacional de encoste do CD (11:00 -> 23:59 -> 00:00 -> 09:59)', () => {
+    const rawTimes = [
+      '01:00', '02:00', '04:00', '06:00', '09:00', 
+      '11:00', '13:00', '15:00', '19:00', '23:00', '00:00', '00:01'
+    ];
+
+    const sorted = [...rawTimes].sort(
+      (a, b) => getEncosteOperationalMinutes(a) - getEncosteOperationalMinutes(b)
+    );
+
+    expect(sorted).toEqual([
+      '11:00', '13:00', '15:00', '19:00', '23:00', '00:00', '00:01',
+      '01:00', '02:00', '04:00', '06:00', '09:00'
+    ]);
+  });
+
   it('não deve estourar se a viagem está com status INICIANDO', () => {
     // 4 argumentos com status operacional na 4ª posição (como o frontend chama)
     const res1 = avaliarStatusJornada('06:00', '', '11:20', 'INICIANDO');
@@ -12,9 +33,8 @@ describe('Jornada e Transferências - Testes de Regra de Negócio', () => {
     expect(res2.status).toBe('SEM ESTOURO');
   });
 
-  it('não deve estourar quando a pegada é agendada para mais tarde hoje (ex: agora 08:00 e pegada 20:00)', () => {
-    // Agora 08:00, pegada 20:00
-    const res = avaliarStatusJornada('20:00', '', '11:20', '08:00');
+  it('não deve estourar quando a pegada é agendada para mais tarde hoje (ex: agora 14:00 e pegada 20:00)', () => {
+    const res = avaliarStatusJornada('20:00', '', '11:20', '14:00', 'EM TRANSITO');
     expect(res.status).toBe('SEM ESTOURO');
     expect(res.minutosRestantes).toBe(680); // 11h20 completas
   });

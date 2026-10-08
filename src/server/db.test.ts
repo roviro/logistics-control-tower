@@ -222,4 +222,65 @@ describe('Ordem dos PDFs e Reutilização de Rotas de Transferência', () => {
     const rotasOrd = res.map(r => r.rota);
     expect(rotasOrd).toEqual(['ROTA_A_15H', 'ROTA_B_15H', 'ROTA_C_16H', 'ROTA_D_16H']);
   });
+
+  it('deve ordenar o ciclo completo de carregamento (11h da manhã -> 23h noite -> 01h madrugada -> 06h manhã seguinte)', () => {
+    const escala = getOrCreateEscala('2099-11-30');
+    const escalaId = escala.id;
+
+    const baseRota = (id: string, rota: string, hora: string, ordem: number): ViagemDistribuicao => ({
+      id,
+      escala_id: escalaId,
+      embarque_cod: '',
+      rota,
+      tipo_veiculo: 'TRUCK',
+      doca: '10',
+      hora_encoste_previsto: hora,
+      hora_saida_motorista: '',
+      horario_saida_real: '',
+      justificativa_saida: '',
+      qtd_lojas: 1,
+      lojas: 'LOJA 1',
+      volume_m3: 10,
+      qtd_caixas: 100,
+      primeira_entrega: 'LOJA 1',
+      horario_primeira_entrega: '',
+      horario_real_primeira_loja: '',
+      status_primeira_loja: 'OK',
+      hora_ultima_loja: '',
+      retorno_previsto: '',
+      pirometro: '',
+      placa_cavalo: '',
+      placa_carreta: '',
+      vinculo_gobrax: 'DESVINCULADO',
+      motorista_nome: '',
+      motorista_restrito: false,
+      ajudante_1: '',
+      ajudante_2: '',
+      observacoes: '',
+      valor_diaria: 0,
+      status_diaria: 'Pendente',
+      status_motorista: 'OK',
+      status_carregamento: 'Pendente',
+      ordem
+    });
+
+    const rotas: ViagemDistribuicao[] = [
+      baseRota('m1', 'ROTA_MADRUGADA_01H', '01:00', 3),
+      baseRota('m2', 'ROTA_MADRUGADA_06H', '06:00', 4),
+      baseRota('d1', 'ROTA_DIA_11H', '11:00', 1),
+      baseRota('n1', 'ROTA_NOITE_23H', '23:00', 2)
+    ];
+
+    saveImportedData(escalaId, rotas, []);
+    const { distribuicoes } = getEscalaCompleta('2099-11-30');
+    const res = distribuicoes.filter(d => d.escala_id === escalaId);
+    const ordemFinal = res.map(r => r.rota);
+
+    expect(ordemFinal).toEqual([
+      'ROTA_DIA_11H',
+      'ROTA_NOITE_23H',
+      'ROTA_MADRUGADA_01H',
+      'ROTA_MADRUGADA_06H'
+    ]);
+  });
 });
